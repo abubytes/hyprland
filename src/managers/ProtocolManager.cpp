@@ -78,6 +78,8 @@
 #include <aquamarine/buffer/Buffer.hpp>
 #include <xf86drm.h>
 #include <aquamarine/backend/Backend.hpp>
+#include <unordered_set>
+#include <vector>
 #include <hyprutils/memory/UniquePtr.hpp>
 
 // ********************************************************************************************
@@ -92,19 +94,72 @@ void CProtocolManager::onMonitorModeChange(PHLMONITOR pMonitor) {
     // mirrored outputs should have their global removed, as they are not physical parts of the
     // layout.
 
-    if (ISMIRROR && PROTO::outputs.contains(pMonitor->m_name))
-        PROTO::outputs.at(pMonitor->m_name)->remove();
-    else if (!ISMIRROR && (!PROTO::outputs.contains(pMonitor->m_name) || PROTO::outputs.at(pMonitor->m_name)->isDefunct())) {
-        if (PROTO::outputs.contains(pMonitor->m_name))
-            PROTO::outputs.erase(pMonitor->m_name);
-        auto p = PROTO::outputs.emplace(pMonitor->m_name,
-                                        makeShared<CWLOutputProtocol>(&wl_output_interface, 4, std::format("WLOutput ({})", pMonitor->m_name), pMonitor->m_self.lock()));
-        p.first->second->m_self = p.first->second;
-    }
+    if (ISMIRROR)
+        removeOutputForMonitor(pMonitor->m_name);
+    else
+        ensureOutputForMonitor(pMonitor);
 
     if (PROTO::colorManagement && g_pCompositor->shouldChangePreferredImageDescription()) {
         Log::logger->log(Log::ERR, "FIXME: color management protocol is enabled, need a preferred image description id");
         PROTO::colorManagement->onImagePreferredChanged(0);
+    }
+}
+
+void CProtocolManager::ensureOutputForMonitor(PHLMONITOR pMonitor) {
+    if (!pMonitor || pMonitor->isMirror() || pMonitor == g_pCompositor->m_unsafeOutput)
+        return;
+
+    if (PROTO::outputs.contains(pMonitor->m_name)) {
+        const auto EXISTING = PROTO::outputs.at(pMonitor->m_name);
+        if (!EXISTING->isDefunct() && EXISTING->m_monitor.lock() == pMonitor)
+            return;
+
+        if (!EXISTING->isDefunct()) {
+            EXISTING->updateMonitor(pMonitor);
+            m_modeChangeListeners[pMonitor->m_name] = pMonitor->m_events.modeChanged.listen([this, pMonitor] { onMonitorModeChange(pMonitor); });
+            return;
+        }
+
+        EXISTING->remove();
+        PROTO::outputs.erase(pMonitor->m_name);
+        m_modeChangeListeners.erase(pMonitor->m_name);
+    }
+
+    auto ref = makeShared<CWLOutputProtocol>(&wl_output_interface, 4, std::format("WLOutput ({})", pMonitor->m_name), pMonitor->m_self.lock());
+    PROTO::outputs.emplace(pMonitor->m_name, ref);
+    ref->m_self = ref;
+
+    m_modeChangeListeners[pMonitor->m_name] = pMonitor->m_events.modeChanged.listen([this, pMonitor] { onMonitorModeChange(pMonitor); });
+}
+
+void CProtocolManager::removeOutputForMonitor(const std::string& name) {
+    if (!PROTO::outputs.contains(name))
+        return;
+
+    PROTO::outputs.at(name)->remove();
+    m_modeChangeListeners.erase(name);
+}
+
+void CProtocolManager::syncOutputsWithMonitorLayout() {
+    std::unordered_set<std::string> wanted;
+
+    for (auto const& m : g_pCompositor->m_monitors) {
+        if (!m || !m->m_enabled || m->isMirror() || m == g_pCompositor->m_unsafeOutput)
+            continue;
+
+        wanted.emplace(m->m_name);
+        ensureOutputForMonitor(m);
+    }
+
+    std::vector<std::string> stale;
+
+    for (auto const& [name, output] : PROTO::outputs) {
+        if (!wanted.contains(name))
+            stale.emplace_back(name);
+    }
+
+    for (auto const& name : stale) {
+        removeOutputForMonitor(name);
     }
 }
 
@@ -123,19 +178,16 @@ CProtocolManager::CProtocolManager() {
         if (M->isMirror() || M == g_pCompositor->m_unsafeOutput)
             return;
 
-        if (PROTO::outputs.contains(M->m_name))
-            PROTO::outputs.erase(M->m_name);
-
-        auto ref = makeShared<CWLOutputProtocol>(&wl_output_interface, 4, std::format("WLOutput ({})", M->m_name), M->m_self.lock());
-        PROTO::outputs.emplace(M->m_name, ref);
-        ref->m_self = ref;
-
-        m_modeChangeListeners[M->m_name] = M->m_events.modeChanged.listen([this, M] { onMonitorModeChange(M); });
+        ensureOutputForMonitor(M);
     });
 
     static auto P2 = Event::bus()->m_events.monitor.removed.listen([this](PHLMONITOR M) {
         if (!PROTO::outputs.contains(M->m_name))
             return;
+
+        if (PROTO::outputs.at(M->m_name)->m_monitor.lock() != M)
+            return;
+
         PROTO::outputs.at(M->m_name)->remove();
         m_modeChangeListeners.erase(M->m_name);
     });

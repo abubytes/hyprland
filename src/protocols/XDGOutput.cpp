@@ -85,12 +85,10 @@ void CXDGOutputProtocol::updateAllOutputs() {
     LOGM(Log::DEBUG, "updating all xdg_output heads");
 
     for (auto const& o : m_xdgOutputs) {
-        if (!o->m_monitor)
-            continue;
-
         o->sendDetails();
 
-        o->m_monitor->scheduleDone();
+        if (o->m_monitor)
+            o->m_monitor->scheduleDone();
     }
 }
 
@@ -107,7 +105,13 @@ CXDGOutput::CXDGOutput(SP<CZxdgOutputV1> resource_, PHLMONITOR monitor_) : m_mon
 void CXDGOutput::sendDetails() {
     static auto PXWLFORCESCALEZERO = CConfigValue<Config::INTEGER>("xwayland:force_zero_scaling");
 
-    if UNLIKELY (!m_monitor || !m_outputProto || m_outputProto->isDefunct())
+    if UNLIKELY (!m_outputProto || m_outputProto->isDefunct())
+        return;
+
+    if (const auto OUTPUT_MONITOR = m_outputProto->m_monitor.lock(); OUTPUT_MONITOR)
+        m_monitor = OUTPUT_MONITOR;
+
+    if UNLIKELY (!m_monitor)
         return;
 
     const auto POS = m_isXWayland ? m_monitor->m_xwaylandPosition : m_monitor->m_position;

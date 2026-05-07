@@ -183,6 +183,12 @@ class CMonitor {
     PHLMONITORREF              m_mirrorOf;
     std::vector<PHLMONITORREF> m_mirrors;
 
+    // Logical monitor splits backed by a physical output.
+    bool                        m_isVirtual = false;
+    PHLMONITORREF               m_parentMonitor;
+    size_t                      m_virtualIndex = 0;
+    std::vector<PHLMONITORREF>  m_virtualMonitors;
+
     // ctm
     Mat3x3 m_ctm        = Mat3x3::identity();
     bool   m_ctmUpdated = false;
@@ -307,6 +313,8 @@ class CMonitor {
     bool        shouldSkipScheduleFrameOnMouseEvent();
     void        setMirror(const std::string&);
     bool        isMirror();
+    bool        isVirtual() const;
+    PHLMONITOR  physicalMonitor() const;
     bool        matchesStaticSelector(const std::string& selector) const;
     float       getDefaultScale();
     void        changeWorkspace(const PHLWORKSPACE& pWorkspace, bool internal = false, bool noMouseMove = false, bool noFocus = false);

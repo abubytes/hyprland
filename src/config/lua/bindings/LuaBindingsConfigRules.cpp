@@ -135,6 +135,8 @@ namespace {
          }},
         {"icc", []() -> ILuaConfigValue* { return new CLuaConfigString(STRVAL_EMPTY); },
          [](ILuaConfigValue* v, CMonitorRuleParser& p) { return p.parseICC(*sc<const Config::STRING*>(v->data())); }},
+        {"split", []() -> ILuaConfigValue* { return new CLuaConfigString("1x1"); },
+         [](ILuaConfigValue* v, CMonitorRuleParser& p) { return p.parseSplit(*sc<const Config::STRING*>(v->data())); }},
         {"supports_wide_color", []() -> ILuaConfigValue* { return new CLuaConfigInt(0, -1, 1); },
          [](ILuaConfigValue* v, CMonitorRuleParser& p) {
              p.rule().m_supportsWideColor = sc<int>(*sc<const Config::INTEGER*>(v->data()));

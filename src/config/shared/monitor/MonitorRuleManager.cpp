@@ -140,6 +140,8 @@ void CMonitorRuleManager::performMonitorReload() {
     if (overAgain)
         performMonitorReload();
 
+    g_pCompositor->rebuildVirtualMonitors();
+
     m_reloadScheduled = false;
 
     Event::bus()->m_events.monitor.layoutChanged.emit();

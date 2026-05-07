@@ -2,6 +2,7 @@
 
 #include <string>
 #include <optional>
+#include <vector>
 #include <xf86drmMode.h>
 
 #include "../../../helpers/math/Math.hpp"
@@ -58,5 +59,28 @@ namespace Config {
 
         drmModeModeInfo    m_drmMode = {};
         std::optional<int> m_vrr;
+
+        struct SSplitTrack {
+            enum eType : uint8_t {
+                TRACK_PIXELS = 0,
+                TRACK_PERCENT,
+                TRACK_FRACTION,
+            };
+
+            eType type  = TRACK_FRACTION;
+            float value = 1.F;
+        };
+
+        struct SSplitArea {
+            std::string name;
+            Vector2D    offset;
+            Vector2D    size;
+        };
+
+        // columns x rows. 1x1 keeps the physical output as a single logical monitor.
+        Vector2D                 m_split = Vector2D(1, 1);
+        std::vector<SSplitTrack> m_splitColumns;
+        std::vector<SSplitTrack> m_splitRows;
+        std::vector<SSplitArea>  m_splitAreas;
     };
 };

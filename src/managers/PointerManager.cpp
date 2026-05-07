@@ -614,11 +614,13 @@ SP<Aquamarine::IBuffer> CPointerManager::renderHWCursorBuffer(SP<CPointerManager
     return buf;
 }
 
-void CPointerManager::renderSoftwareCursorsFor(PHLMONITOR pMonitor, const Time::steady_tp& now, CRegion& damage, std::optional<Vector2D> overridePos, bool forceRender) {
+void CPointerManager::renderSoftwareCursorsFor(PHLMONITOR pMonitor, const Time::steady_tp& now, CRegion& damage, std::optional<Vector2D> overridePos, bool forceRender,
+                                               Vector2D renderOffset) {
     if (!hasCursor())
         return;
 
     auto state = stateFor(pMonitor);
+    state->box = getCursorBoxLogicalForMonitor(pMonitor);
 
     if (!state->hardwareFailed && state->softwareLocks == 0 && !forceRender) {
         if (m_currentCursorImage.surface)
@@ -646,6 +648,7 @@ void CPointerManager::renderSoftwareCursorsFor(PHLMONITOR pMonitor, const Time::
     if (!texture)
         return;
 
+    box.translate(renderOffset);
     box.scale(pMonitor->m_scale);
     box.x = std::round(box.x);
     box.y = std::round(box.y);

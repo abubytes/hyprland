@@ -201,6 +201,67 @@ TEST(Config, monitorParserICC) {
     EXPECT_TRUE(p2.getError().has_value());
 }
 
+TEST(Config, monitorParserSplit) {
+    CMonitorRuleParser horizontal("DP-1");
+    EXPECT_TRUE(horizontal.parseSplit("horizontal"));
+    EXPECT_EQ(horizontal.rule().m_split, Vector2D(2, 1));
+
+    CMonitorRuleParser vertical("DP-1");
+    EXPECT_TRUE(vertical.parseSplit("vertical:3"));
+    EXPECT_EQ(vertical.rule().m_split, Vector2D(1, 3));
+
+    CMonitorRuleParser grid("DP-1");
+    EXPECT_TRUE(grid.parseSplit("4x2"));
+    EXPECT_EQ(grid.rule().m_split, Vector2D(4, 2));
+
+    CMonitorRuleParser disabled("DP-1");
+    EXPECT_TRUE(disabled.parseSplit("off"));
+    EXPECT_EQ(disabled.rule().m_split, Vector2D(1, 1));
+
+    CMonitorRuleParser invalid("DP-1");
+    EXPECT_FALSE(invalid.parseSplit("17x1"));
+    EXPECT_TRUE(invalid.getError().has_value());
+}
+
+TEST(Config, monitorParserSplitTracks) {
+    CMonitorRuleParser cols("DP-1");
+    EXPECT_TRUE(cols.parseSplit("cols:1680|*|2fr|25%"));
+    ASSERT_EQ(cols.rule().m_splitColumns.size(), 4);
+    EXPECT_EQ(cols.rule().m_splitColumns[0].type, CMonitorRule::SSplitTrack::TRACK_PIXELS);
+    EXPECT_FLOAT_EQ(cols.rule().m_splitColumns[0].value, 1680.F);
+    EXPECT_EQ(cols.rule().m_splitColumns[1].type, CMonitorRule::SSplitTrack::TRACK_FRACTION);
+    EXPECT_FLOAT_EQ(cols.rule().m_splitColumns[1].value, 1.F);
+    EXPECT_EQ(cols.rule().m_splitColumns[2].type, CMonitorRule::SSplitTrack::TRACK_FRACTION);
+    EXPECT_FLOAT_EQ(cols.rule().m_splitColumns[2].value, 2.F);
+    EXPECT_EQ(cols.rule().m_splitColumns[3].type, CMonitorRule::SSplitTrack::TRACK_PERCENT);
+    EXPECT_FLOAT_EQ(cols.rule().m_splitColumns[3].value, 0.25F);
+    ASSERT_EQ(cols.rule().m_splitRows.size(), 1);
+    EXPECT_EQ(cols.rule().m_split, Vector2D(4, 1));
+
+    CMonitorRuleParser grid("DP-1");
+    EXPECT_TRUE(grid.parseSplit("grid:cols=1680|*;rows=900|*"));
+    ASSERT_EQ(grid.rule().m_splitColumns.size(), 2);
+    ASSERT_EQ(grid.rule().m_splitRows.size(), 2);
+    EXPECT_EQ(grid.rule().m_split, Vector2D(2, 2));
+}
+
+TEST(Config, monitorParserSplitAreas) {
+    CMonitorRuleParser parser("DP-1");
+    EXPECT_TRUE(parser.parseSplit("areas:left=0x0@1680x1440;right-top=1680x0@1760x720;right-bottom=1680x720@1760x720"));
+    ASSERT_EQ(parser.rule().m_splitAreas.size(), 3);
+    EXPECT_EQ(parser.rule().m_splitAreas[0].name, "left");
+    EXPECT_EQ(parser.rule().m_splitAreas[0].offset, Vector2D(0, 0));
+    EXPECT_EQ(parser.rule().m_splitAreas[0].size, Vector2D(1680, 1440));
+    EXPECT_EQ(parser.rule().m_splitAreas[1].name, "right-top");
+    EXPECT_EQ(parser.rule().m_splitAreas[1].offset, Vector2D(1680, 0));
+    EXPECT_EQ(parser.rule().m_splitAreas[1].size, Vector2D(1760, 720));
+    EXPECT_EQ(parser.rule().m_split, Vector2D(3, 1));
+
+    CMonitorRuleParser invalid("DP-1");
+    EXPECT_FALSE(invalid.parseSplit("areas:bad name=0x0@100x100"));
+    EXPECT_TRUE(invalid.getError().has_value());
+}
+
 TEST(Config, monitorParserSetDisabled) {
     CMonitorRuleParser parser("DP-1");
     parser.setDisabled();

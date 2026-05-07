@@ -271,25 +271,40 @@ wl_client* CWLSurfaceResource::client() {
     return m_client;
 }
 
+static PHLMONITOR outputGlobalMonitorFor(PHLMONITOR monitor) {
+    if (!monitor)
+        return {};
+
+    if (PROTO::outputs.contains(monitor->m_name))
+        return monitor;
+
+    const auto PHYSICAL = monitor->physicalMonitor();
+    if (PHYSICAL && PROTO::outputs.contains(PHYSICAL->m_name))
+        return PHYSICAL;
+
+    return {};
+}
+
 void CWLSurfaceResource::enter(PHLMONITOR monitor) {
     if (std::ranges::find(m_enteredOutputs, monitor) != m_enteredOutputs.end())
         return;
 
-    if UNLIKELY (!PROTO::outputs.contains(monitor->m_name)) {
+    const auto OUTPUT_MONITOR = outputGlobalMonitorFor(monitor);
+    if UNLIKELY (!OUTPUT_MONITOR || !PROTO::outputs.contains(OUTPUT_MONITOR->m_name)) {
         // can happen on unplug/replug
         LOGM(Log::ERR, "enter() called on a non-existent output global");
         return;
     }
 
-    if UNLIKELY (PROTO::outputs.at(monitor->m_name)->isDefunct()) {
+    if UNLIKELY (PROTO::outputs.at(OUTPUT_MONITOR->m_name)->isDefunct()) {
         LOGM(Log::ERR, "enter() called on a defunct output global");
         return;
     }
 
-    auto outputs = PROTO::outputs.at(monitor->m_name)->outputResourcesFrom(m_client);
+    auto outputs = PROTO::outputs.at(OUTPUT_MONITOR->m_name)->outputResourcesFrom(m_client);
 
     if UNLIKELY (outputs.empty() || std::ranges::all_of(outputs, [](const auto& o) { return !o->getResource() || !o->getResource()->resource(); })) {
-        LOGM(Log::ERR, "Cannot enter surface {:x} to {}, client hasn't bound the output", (uintptr_t)this, monitor->m_name);
+        LOGM(Log::ERR, "Cannot enter surface {:x} to {}, client hasn't bound the output", (uintptr_t)this, OUTPUT_MONITOR->m_name);
         return;
     }
 
@@ -307,10 +322,14 @@ void CWLSurfaceResource::leave(PHLMONITOR monitor) {
     if UNLIKELY (std::ranges::find(m_enteredOutputs, monitor) == m_enteredOutputs.end())
         return;
 
-    auto outputs = PROTO::outputs.at(monitor->m_name)->outputResourcesFrom(m_client);
+    const auto OUTPUT_MONITOR = outputGlobalMonitorFor(monitor);
+    if UNLIKELY (!OUTPUT_MONITOR || !PROTO::outputs.contains(OUTPUT_MONITOR->m_name))
+        return;
+
+    auto outputs = PROTO::outputs.at(OUTPUT_MONITOR->m_name)->outputResourcesFrom(m_client);
 
     if UNLIKELY (outputs.empty() || std::ranges::all_of(outputs, [](const auto& o) { return !o->getResource() || !o->getResource()->resource(); })) {
-        LOGM(Log::ERR, "Cannot leave surface {:x} from {}, client hasn't bound the output", (uintptr_t)this, monitor->m_name);
+        LOGM(Log::ERR, "Cannot leave surface {:x} from {}, client hasn't bound the output", (uintptr_t)this, OUTPUT_MONITOR->m_name);
         return;
     }
 

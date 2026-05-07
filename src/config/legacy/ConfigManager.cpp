@@ -578,6 +578,7 @@ CConfigManager::CConfigManager() {
     m_config->addSpecialConfigValue("monitorv2", "max_luminance", Hyprlang::INT{-1});
     m_config->addSpecialConfigValue("monitorv2", "max_avg_luminance", Hyprlang::INT{-1});
     m_config->addSpecialConfigValue("monitorv2", "icc", Hyprlang::STRING{""});
+    m_config->addSpecialConfigValue("monitorv2", "split", Hyprlang::STRING{"1x1"});
 
     // windowrule v3
     m_config->addSpecialCategory("windowrule", {.key = "name"});
@@ -860,6 +861,9 @@ std::optional<std::string> CConfigManager::handleMonitorv2(const std::string& ou
     VAL = m_config->getSpecialConfigValuePtr("monitorv2", "icc", output.c_str());
     if (VAL && VAL->m_bSetByUser)
         parser.rule().m_iccFile = std::any_cast<Hyprlang::STRING>(VAL->getValue());
+    VAL = m_config->getSpecialConfigValuePtr("monitorv2", "split", output.c_str());
+    if (VAL && VAL->m_bSetByUser)
+        parser.parseSplit(std::any_cast<Hyprlang::STRING>(VAL->getValue()));
 
     auto newrule = parser.rule();
 
@@ -1360,6 +1364,9 @@ std::optional<std::string> CConfigManager::handleMonitor(const std::string& comm
             argno++;
         } else if (ARGS[argno] == "icc") {
             parser.parseICC(std::string(ARGS[argno + 1]));
+            argno++;
+        } else if (ARGS[argno] == "split") {
+            parser.parseSplit(std::string(ARGS[argno + 1]));
             argno++;
         } else {
             Log::logger->log(Log::ERR, "Config error: invalid monitor syntax at \"{}\"", ARGS[argno]);

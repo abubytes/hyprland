@@ -75,7 +75,7 @@ CMonitor::CMonitor(SP<Aquamarine::IOutput> output_) : m_state(this), m_output(ou
 
 CMonitor::~CMonitor() {
     m_events.destroy.emit();
-    if (g_pHyprRenderer && g_pHyprRenderer->glBackend())
+    if (!m_isVirtual && g_pHyprRenderer && g_pHyprRenderer->glBackend())
         g_pHyprRenderer->glBackend()->destroyMonitorResources(m_self);
 }
 
@@ -708,7 +708,8 @@ bool CMonitor::applyMonitorRule(Config::CMonitorRule&& pMonitorRule, bool force)
         std::ranges::sort(sortedModes, sortFunc);
         if (sortedModes.size() > 3)
             sortedModes.erase(sortedModes.begin() + 3, sortedModes.end());
-        requestedModes.insert_range(requestedModes.end(), sortedModes | std::views::reverse);
+        for (auto const& mode : sortedModes | std::views::reverse)
+            requestedModes.push_back(mode);
     };
 
     // last fallback is always preferred mode
@@ -1107,6 +1108,17 @@ bool CMonitor::applyMonitorRule(Config::CMonitorRule&& pMonitorRule, bool force)
 }
 
 void CMonitor::addDamage(const pixman_region32_t* rg) {
+    if (m_isVirtual) {
+        const auto PARENT = physicalMonitor();
+        if (!PARENT)
+            return;
+
+        CRegion damage{rg};
+        damage.translate(((m_position - PARENT->m_position) * PARENT->m_scale).round());
+        PARENT->addDamage(damage);
+        return;
+    }
+
     if (m_cursorZoom->value() != 1.f && g_pCompositor->getMonitorFromCursor() == m_self) {
         m_damage.damageEntire();
         g_pCompositor->scheduleFrameForMonitor(m_self.lock(), Aquamarine::IOutput::AQ_SCHEDULE_DAMAGE);
@@ -1119,6 +1131,15 @@ void CMonitor::addDamage(const CRegion& rg) {
 }
 
 void CMonitor::addDamage(const CBox& box) {
+    if (m_isVirtual) {
+        const auto PARENT = physicalMonitor();
+        if (!PARENT)
+            return;
+
+        PARENT->addDamage(box.copy().translate(((m_position - PARENT->m_position) * PARENT->m_scale).round()));
+        return;
+    }
+
     if (m_cursorZoom->value() != 1.f && g_pCompositor->getMonitorFromCursor() == m_self) {
         m_damage.damageEntire();
         g_pCompositor->scheduleFrameForMonitor(m_self.lock(), Aquamarine::IOutput::AQ_SCHEDULE_DAMAGE);
@@ -1153,6 +1174,17 @@ bool CMonitor::isMirror() {
     return m_mirrorOf != nullptr;
 }
 
+bool CMonitor::isVirtual() const {
+    return m_isVirtual;
+}
+
+PHLMONITOR CMonitor::physicalMonitor() const {
+    if (m_isVirtual && m_parentMonitor)
+        return m_parentMonitor.lock();
+
+    return m_self.lock();
+}
+
 bool CMonitor::matchesStaticSelector(const std::string& selector) const {
     if (selector.starts_with("desc:")) {
         // match by description
@@ -1161,7 +1193,15 @@ bool CMonitor::matchesStaticSelector(const std::string& selector) const {
         return m_description.starts_with(DESCRIPTIONSELECTOR) || m_shortDescription.starts_with(DESCRIPTIONSELECTOR);
     } else {
         // match by selector
-        return m_name == selector;
+        if (m_name == selector)
+            return true;
+
+        if (m_isVirtual) {
+            const auto PARENT = m_parentMonitor.lock();
+            return PARENT && PARENT->m_name == selector && m_virtualIndex == 0;
+        }
+
+        return false;
     }
 }
 

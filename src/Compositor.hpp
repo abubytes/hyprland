@@ -54,6 +54,7 @@ class CCompositor {
 
     std::vector<PHLMONITOR>                      m_monitors;
     std::vector<PHLMONITOR>                      m_realMonitors; // for all monitors, even those turned off
+    std::vector<PHLMONITOR>                      m_virtualMonitors;
     std::vector<PHLWINDOW>                       m_windows;
     std::vector<PHLLS>                           m_layers;
     std::vector<PHLWINDOWREF>                    m_windowsFadingOut;
@@ -106,6 +107,9 @@ class CCompositor {
     Vector2D               vectorToSurfaceLocal(const Vector2D&, PHLWINDOW, SP<CWLSurfaceResource>);
     PHLMONITOR             getMonitorFromOutput(SP<Aquamarine::IOutput>);
     PHLMONITOR             getRealMonitorFromOutput(SP<Aquamarine::IOutput>);
+    std::vector<PHLMONITOR> getLogicalMonitorsFor(PHLMONITOR);
+    PHLMONITOR             getPrimaryLogicalMonitor(PHLMONITOR);
+    void                   rebuildVirtualMonitors();
     PHLWINDOW              getWindowFromSurface(SP<CWLSurfaceResource>);
     PHLWINDOW              getWindowFromHandle(uint32_t);
     PHLWORKSPACE           getWorkspaceByID(const WORKSPACEID&);

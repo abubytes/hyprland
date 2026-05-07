@@ -28,11 +28,14 @@
 #include <algorithm>
 #include <aquamarine/output/Output.hpp>
 #include <bit>
+#include <climits>
+#include <cmath>
 #include <ctime>
 #include <random>
 #include <print>
 #include <cstring>
 #include <filesystem>
+#include <unordered_map>
 #include <unordered_set>
 #include "debug/HyprCtl.hpp"
 #include "debug/crash/CrashReporter.hpp"
@@ -575,6 +578,7 @@ void CCompositor::cleanup() {
     g_pXWayland.reset();
 
     m_monitors.clear();
+    m_virtualMonitors.clear();
 
     wl_display_destroy_clients(g_pCompositor->m_wlDisplay);
     removeAllSignals();
@@ -1196,6 +1200,337 @@ PHLMONITOR CCompositor::getRealMonitorFromOutput(SP<Aquamarine::IOutput> out) {
     }
 
     return nullptr;
+}
+
+std::vector<PHLMONITOR> CCompositor::getLogicalMonitorsFor(PHLMONITOR pMonitor) {
+    std::vector<PHLMONITOR> result;
+    if (!pMonitor)
+        return result;
+
+    const auto PHYSICAL = pMonitor->physicalMonitor();
+    if (!PHYSICAL)
+        return result;
+
+    for (auto const& m : m_monitors) {
+        if (!m || !m->m_enabled)
+            continue;
+
+        if (m->physicalMonitor() == PHYSICAL)
+            result.emplace_back(m);
+    }
+
+    return result;
+}
+
+PHLMONITOR CCompositor::getPrimaryLogicalMonitor(PHLMONITOR pMonitor) {
+    const auto LOGICAL = getLogicalMonitorsFor(pMonitor);
+    if (!LOGICAL.empty())
+        return LOGICAL.front();
+
+    return pMonitor;
+}
+
+static WORKSPACEID nextFreeWorkspaceID() {
+    for (WORKSPACEID i = 1; i < LONG_MAX; ++i) {
+        if (!g_pCompositor->getWorkspaceByID(i))
+            return i;
+    }
+
+    return LONG_MAX;
+}
+
+void CCompositor::rebuildVirtualMonitors() {
+    if (m_isShuttingDown)
+        return;
+
+    std::unordered_map<std::string, PHLWORKSPACE> previousActiveWorkspaces;
+    std::string                                   previousFocusedMonitor;
+
+    if (const auto FOCUSED = Desktop::focusState()->monitor())
+        previousFocusedMonitor = FOCUSED->m_name;
+
+    for (auto const& m : m_monitors) {
+        if (m && m->m_activeWorkspace)
+            previousActiveWorkspaces[m->m_name] = m->m_activeWorkspace;
+    }
+
+    for (auto const& m : m_realMonitors) {
+        if (m)
+            m->m_virtualMonitors.clear();
+    }
+
+    m_virtualMonitors.clear();
+    m_monitors.clear();
+
+    auto attachWorkspace = [&](PHLMONITOR monitor, PHLWORKSPACE workspace) {
+        if (!monitor || !workspace)
+            return;
+
+        const auto OLD_MONITOR = workspace->m_monitor.lock();
+        workspace->m_monitor   = monitor;
+        workspace->m_visible   = true;
+        workspace->m_lastMonitor.clear();
+        workspace->m_space->recheckWorkArea();
+        workspace->m_events.monitorChanged.emit();
+
+        monitor->m_activeWorkspace = workspace;
+
+        for (auto const& w : m_windows) {
+            if (w->m_workspace != workspace || w->m_pinned)
+                continue;
+
+            w->m_monitor = monitor;
+
+            if (OLD_MONITOR && OLD_MONITOR != monitor && w->m_isFloating)
+                w->layoutTarget()->setPositionGlobal(w->layoutTarget()->position().translate(-OLD_MONITOR->m_position + monitor->m_position));
+
+            if (w->isFullscreen()) {
+                *w->m_realPosition = monitor->m_position;
+                *w->m_realSize     = monitor->m_size;
+            }
+
+            w->updateToplevel();
+        }
+    };
+
+    auto createWorkspaceFor = [&](PHLMONITOR monitor) -> PHLWORKSPACE {
+        const auto ID = nextFreeWorkspaceID();
+        return CWorkspace::create(ID, monitor, std::to_string(ID));
+    };
+
+    struct SResolvedSplit {
+        std::string suffix;
+        Vector2D    offset;
+        Vector2D    size;
+    };
+
+    auto resolveTracks = [](const std::vector<Config::CMonitorRule::SSplitTrack>& tracks_, double total) -> std::vector<double> {
+        const std::vector<Config::CMonitorRule::SSplitTrack> defaultTracks = {Config::CMonitorRule::SSplitTrack{}};
+        const auto&                                         tracks        = tracks_.empty() ? defaultTracks : tracks_;
+
+        double fixed = 0;
+        double weight = 0;
+        for (const auto& track : tracks) {
+            if (track.type == Config::CMonitorRule::SSplitTrack::TRACK_PIXELS)
+                fixed += track.value;
+            else if (track.type == Config::CMonitorRule::SSplitTrack::TRACK_PERCENT)
+                fixed += total * track.value;
+            else
+                weight += track.value;
+        }
+
+        const double FIXED_SCALE = fixed > total && fixed > 0 ? total / fixed : 1.0;
+        const double REMAINING   = std::max(0.0, total - fixed * FIXED_SCALE);
+
+        std::vector<double> edges;
+        edges.reserve(tracks.size() + 1);
+        edges.emplace_back(0);
+
+        double cursor = 0;
+        for (size_t i = 0; i < tracks.size(); ++i) {
+            const auto& track = tracks[i];
+            double      size  = 0;
+
+            if (track.type == Config::CMonitorRule::SSplitTrack::TRACK_PIXELS)
+                size = track.value * FIXED_SCALE;
+            else if (track.type == Config::CMonitorRule::SSplitTrack::TRACK_PERCENT)
+                size = total * track.value * FIXED_SCALE;
+            else if (weight > 0)
+                size = REMAINING * track.value / weight;
+
+            cursor += size;
+            edges.emplace_back(i + 1 == tracks.size() ? total : std::clamp(cursor, 0.0, total));
+        }
+
+        edges.back() = total;
+        return edges;
+    };
+
+    auto resolveSplitsFor = [&](PHLMONITOR realMonitor) -> std::vector<SResolvedSplit> {
+        std::vector<SResolvedSplit> result;
+
+        if (!realMonitor->m_activeMonitorRule.m_splitAreas.empty()) {
+            for (const auto& area : realMonitor->m_activeMonitorRule.m_splitAreas) {
+                const double X1 = std::clamp(area.offset.x, 0.0, realMonitor->m_size.x);
+                const double Y1 = std::clamp(area.offset.y, 0.0, realMonitor->m_size.y);
+                const double X2 = std::clamp(area.offset.x + area.size.x, 0.0, realMonitor->m_size.x);
+                const double Y2 = std::clamp(area.offset.y + area.size.y, 0.0, realMonitor->m_size.y);
+
+                if (X2 <= X1 || Y2 <= Y1)
+                    continue;
+
+                result.emplace_back(SResolvedSplit{.suffix = area.name, .offset = Vector2D{X1, Y1}.round(), .size = Vector2D{X2 - X1, Y2 - Y1}.round()});
+            }
+
+            return result;
+        }
+
+        if (!realMonitor->m_activeMonitorRule.m_splitColumns.empty() || !realMonitor->m_activeMonitorRule.m_splitRows.empty()) {
+            const auto XEDGES = resolveTracks(realMonitor->m_activeMonitorRule.m_splitColumns, realMonitor->m_size.x);
+            const auto YEDGES = resolveTracks(realMonitor->m_activeMonitorRule.m_splitRows, realMonitor->m_size.y);
+
+            for (size_t row = 0; row + 1 < YEDGES.size(); ++row) {
+                for (size_t column = 0; column + 1 < XEDGES.size(); ++column) {
+                    const auto X1 = std::round(XEDGES[column]);
+                    const auto X2 = std::round(XEDGES[column + 1]);
+                    const auto Y1 = std::round(YEDGES[row]);
+                    const auto Y2 = std::round(YEDGES[row + 1]);
+
+                    if (X2 <= X1 || Y2 <= Y1)
+                        continue;
+
+                    result.emplace_back(SResolvedSplit{.offset = Vector2D{X1, Y1}, .size = Vector2D{X2 - X1, Y2 - Y1}});
+                }
+            }
+
+            return result;
+        }
+
+        const auto SPLIT_COLUMNS = std::max(1, sc<int>(realMonitor->m_activeMonitorRule.m_split.x));
+        const auto SPLIT_ROWS    = std::max(1, sc<int>(realMonitor->m_activeMonitorRule.m_split.y));
+
+        for (int row = 0; row < SPLIT_ROWS; ++row) {
+            for (int column = 0; column < SPLIT_COLUMNS; ++column) {
+                const auto X1 = std::round(realMonitor->m_size.x * column / SPLIT_COLUMNS);
+                const auto X2 = std::round(realMonitor->m_size.x * (column + 1) / SPLIT_COLUMNS);
+                const auto Y1 = std::round(realMonitor->m_size.y * row / SPLIT_ROWS);
+                const auto Y2 = std::round(realMonitor->m_size.y * (row + 1) / SPLIT_ROWS);
+
+                if (X2 <= X1 || Y2 <= Y1)
+                    continue;
+
+                result.emplace_back(SResolvedSplit{.offset = Vector2D{X1, Y1}, .size = Vector2D{X2 - X1, Y2 - Y1}.round()});
+            }
+        }
+
+        return result;
+    };
+
+    for (auto const& realMonitor : m_realMonitors) {
+        if (!realMonitor || !realMonitor->m_output || !realMonitor->m_enabled || realMonitor->isMirror() || realMonitor->m_isUnsafeFallback)
+            continue;
+
+        const auto HAS_CUSTOM_SPLIT = !realMonitor->m_activeMonitorRule.m_splitColumns.empty() || !realMonitor->m_activeMonitorRule.m_splitRows.empty() ||
+            !realMonitor->m_activeMonitorRule.m_splitAreas.empty();
+        const auto SPLIT_AREAS = resolveSplitsFor(realMonitor);
+
+        if (SPLIT_AREAS.empty() || (!HAS_CUSTOM_SPLIT && SPLIT_AREAS.size() <= 1)) {
+            m_monitors.emplace_back(realMonitor);
+            if (!realMonitor->m_activeWorkspace)
+                realMonitor->m_activeWorkspace = createWorkspaceFor(realMonitor);
+            attachWorkspace(realMonitor, realMonitor->m_activeWorkspace);
+            continue;
+        }
+
+        const auto BASE_ID = std::max<MONITORID>(0, realMonitor->m_id) * 64 + 10000;
+
+        for (size_t i = 0; i < SPLIT_AREAS.size(); ++i) {
+            const auto& AREA  = SPLIT_AREAS[i];
+            const int   INDEX = sc<int>(i);
+
+            auto monitor                  = makeShared<CMonitor>(realMonitor->m_output);
+            monitor->m_self              = monitor;
+            monitor->m_isVirtual         = true;
+            monitor->m_parentMonitor     = realMonitor;
+            monitor->m_virtualIndex      = INDEX;
+            monitor->m_enabled           = true;
+            monitor->m_dpmsStatus        = realMonitor->m_dpmsStatus;
+            monitor->m_name              = AREA.suffix.empty() ? std::format("{}~{}", realMonitor->m_name, INDEX + 1) : std::format("{}~{}", realMonitor->m_name, AREA.suffix);
+            monitor->m_description       = realMonitor->m_description;
+            monitor->m_shortDescription  = realMonitor->m_shortDescription;
+            monitor->m_id                = BASE_ID + INDEX;
+            monitor->m_scale             = realMonitor->m_scale;
+            monitor->m_setScale          = realMonitor->m_setScale;
+            monitor->m_transform         = realMonitor->m_transform;
+            monitor->m_refreshRate       = realMonitor->m_refreshRate;
+            monitor->m_activeMonitorRule = realMonitor->m_activeMonitorRule;
+            monitor->m_reservedArea      = realMonitor->m_reservedArea;
+            monitor->m_cmType            = realMonitor->m_cmType;
+            monitor->m_sdrEotf           = realMonitor->m_sdrEotf;
+            monitor->m_sdrSaturation     = realMonitor->m_sdrSaturation;
+            monitor->m_sdrBrightness     = realMonitor->m_sdrBrightness;
+            monitor->m_imageDescription  = realMonitor->m_imageDescription;
+
+            monitor->m_position        = realMonitor->m_position + AREA.offset;
+            monitor->m_size            = AREA.size;
+            monitor->m_pixelSize       = (monitor->m_size * monitor->m_scale).round();
+            monitor->m_transformedSize = monitor->m_pixelSize;
+            monitor->m_damage.setSize(monitor->m_transformedSize);
+
+            realMonitor->m_virtualMonitors.emplace_back(monitor);
+            m_virtualMonitors.emplace_back(monitor);
+            m_monitors.emplace_back(monitor);
+        }
+    }
+
+    for (auto const& realMonitor : m_realMonitors) {
+        if (!realMonitor || realMonitor->m_virtualMonitors.empty())
+            continue;
+
+        for (auto const& logicalRef : realMonitor->m_virtualMonitors) {
+            const auto LOGICAL = logicalRef.lock();
+            if (!LOGICAL)
+                continue;
+
+            PHLWORKSPACE workspace = nullptr;
+
+            if (previousActiveWorkspaces.contains(LOGICAL->m_name))
+                workspace = previousActiveWorkspaces[LOGICAL->m_name];
+            else if (LOGICAL->m_virtualIndex == 0 && previousActiveWorkspaces.contains(realMonitor->m_name))
+                workspace = previousActiveWorkspaces[realMonitor->m_name];
+            else if (LOGICAL->m_virtualIndex == 0 && realMonitor->m_activeWorkspace)
+                workspace = realMonitor->m_activeWorkspace;
+
+            if (!workspace)
+                workspace = createWorkspaceFor(LOGICAL);
+
+            attachWorkspace(LOGICAL, workspace);
+        }
+
+        realMonitor->m_activeWorkspace = realMonitor->m_virtualMonitors.front().lock()->m_activeWorkspace;
+    }
+
+    const auto FALLBACK_MONITOR = m_monitors.empty() ? PHLMONITOR{} : m_monitors.front();
+    for (auto const& workspace : getWorkspaces()) {
+        if (!workspace || workspace->m_isSpecialWorkspace || !FALLBACK_MONITOR)
+            continue;
+
+        const auto MONITOR = workspace->m_monitor.lock();
+        if (MONITOR && std::ranges::find(m_monitors, MONITOR) != m_monitors.end())
+            continue;
+
+        workspace->m_monitor = FALLBACK_MONITOR;
+        workspace->m_visible = false;
+        workspace->m_space->recheckWorkArea();
+        workspace->m_events.monitorChanged.emit();
+
+        for (auto const& w : m_windows) {
+            if (w->m_workspace == workspace && !w->m_pinned)
+                w->m_monitor = FALLBACK_MONITOR;
+        }
+    }
+
+    if (!previousFocusedMonitor.empty()) {
+        if (const auto FOCUSED = getMonitorFromString(previousFocusedMonitor))
+            Desktop::focusState()->rawMonitorFocus(FOCUSED);
+    }
+
+    if ((!Desktop::focusState()->monitor() || std::ranges::find(m_monitors, Desktop::focusState()->monitor()) == m_monitors.end()) && !m_monitors.empty())
+        Desktop::focusState()->rawMonitorFocus(m_monitors.front());
+
+    for (auto const& m : m_monitors)
+        g_layoutManager->recalculateMonitor(m);
+
+    if (g_pPointerManager)
+        g_pPointerManager->onMonitorLayoutChange();
+
+    if (g_pProtocolManager)
+        g_pProtocolManager->syncOutputsWithMonitorLayout();
+
+    if (PROTO::xdgOutput)
+        PROTO::xdgOutput->updateAllOutputs();
+
+    Event::bus()->m_events.monitor.layoutChanged.emit();
 }
 
 SP<CWLSurfaceResource> CCompositor::vectorToLayerPopupSurface(const Vector2D& pos, PHLMONITOR monitor, Vector2D* sCoords, PHLLS* ppLayerSurfaceFound) {
@@ -1996,7 +2331,7 @@ PHLMONITOR CCompositor::getMonitorFromString(const std::string& name) {
             return nullptr;
         }
 
-        if (monID > -1 && monID < sc<MONITORID>(m_monitors.size())) {
+        if (monID > -1) {
             return getMonitorFromID(monID);
         } else {
             Log::logger->log(Log::ERR, "Error in getMonitorFromString: invalid arg 1");
@@ -2316,6 +2651,12 @@ PHLWINDOW CCompositor::getX11Parent(PHLWINDOW pWindow) {
 
 void CCompositor::scheduleFrameForMonitor(PHLMONITOR pMonitor, IOutput::scheduleFrameReason reason) {
     if ((m_aqBackend->hasSession() && !m_aqBackend->session->active) || !m_sessionActive)
+        return;
+
+    if (pMonitor && pMonitor->isVirtual())
+        pMonitor = pMonitor->physicalMonitor();
+
+    if (!pMonitor)
         return;
 
     if (!pMonitor->m_enabled)
@@ -2762,7 +3103,14 @@ void CCompositor::checkMonitorOverlaps() {
 void CCompositor::arrangeMonitors() {
     static auto             PXWLFORCESCALEZERO = CConfigValue<Config::INTEGER>("xwayland:force_zero_scaling");
 
-    std::vector<PHLMONITOR> toArrange(m_monitors.begin(), m_monitors.end());
+    std::vector<PHLMONITOR> toArrange;
+    for (auto const& m : m_realMonitors) {
+        if (!m || !m->m_enabled || m->isMirror() || m->m_isUnsafeFallback)
+            continue;
+
+        toArrange.emplace_back(m);
+    }
+
     std::vector<PHLMONITOR> arranged;
     arranged.reserve(toArrange.size());
 
@@ -2852,6 +3200,8 @@ void CCompositor::arrangeMonitors() {
         m->moveTo(newPosition);
         arranged.emplace_back(m);
     }
+
+    rebuildVirtualMonitors();
 
     // reset maxXOffsetRight (reuse)
     // and set xwayland positions aka auto for all

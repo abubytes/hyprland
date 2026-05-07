@@ -516,6 +516,172 @@ void IHyprRenderer::renderWorkspaceWindows(PHLMONITOR pMonitor, PHLWORKSPACE pWo
     }
 }
 
+void IHyprRenderer::renderWorkspaceWindowsForMonitor(PHLMONITOR pRenderMonitor, PHLMONITOR pLogicalMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& time) {
+    if (!pRenderMonitor || !pLogicalMonitor || !pWorkspace)
+        return;
+
+    PHLWINDOW lastWindow;
+    Event::bus()->m_events.render.stage.emit(RENDER_PRE_WINDOWS);
+
+    std::vector<PHLWINDOWREF> windows;
+    windows.reserve(g_pCompositor->m_windows.size());
+
+    for (auto const& w : g_pCompositor->m_windows) {
+        if (w->isHidden() || (!w->m_isMapped && !w->m_fadingOut))
+            continue;
+
+        if (w->m_pinned || w->m_workspace != pWorkspace)
+            continue;
+
+        if (!w->visibleOnMonitor(pLogicalMonitor) && !w->m_fadingOut)
+            continue;
+
+        windows.emplace_back(w);
+    }
+
+    auto shouldRenderInWorkspace = [&](PHLWINDOWREF w) -> bool {
+        if (!w)
+            return false;
+
+        if (pWorkspace->m_isSpecialWorkspace != w->onSpecialWorkspace())
+            return false;
+
+        if (pWorkspace->m_hasFullscreenWindow && !w->isFullscreen() && !w->shouldRenderOverFullscreen() && !w->isFadingOutUnderFullscreen())
+            return false;
+
+        return true;
+    };
+
+    for (auto& w : windows) {
+        if (w->m_isFloating || !shouldRenderInWorkspace(w))
+            continue;
+
+        if (w == Desktop::focusState()->window()) {
+            lastWindow = w.lock();
+            continue;
+        }
+
+        if (!w->isFullscreen())
+            renderWindow(w.lock(), pRenderMonitor, time, true, RENDER_PASS_MAIN);
+    }
+
+    if (lastWindow && !lastWindow->isFullscreen())
+        renderWindow(lastWindow, pRenderMonitor, time, true, RENDER_PASS_MAIN);
+
+    for (auto& w : windows) {
+        if (w->m_isFloating || !shouldRenderInWorkspace(w))
+            continue;
+
+        if (w->isFullscreen())
+            renderWindow(w.lock(), pRenderMonitor, time, pWorkspace->m_fullscreenMode != FSMODE_FULLSCREEN, RENDER_PASS_ALL);
+    }
+
+    for (auto& w : windows) {
+        if (!w || w->m_isFloating || !shouldRenderInWorkspace(w) || w->isFullscreen())
+            continue;
+
+        renderWindow(w.lock(), pRenderMonitor, time, true, RENDER_PASS_POPUP);
+    }
+
+    for (auto& w : windows) {
+        if (!w || !w->m_isFloating || !shouldRenderInWorkspace(w))
+            continue;
+
+        if (pWorkspace->m_hasFullscreenWindow && !w->shouldRenderOverFullscreen() && !w->isFadingOutUnderFullscreen())
+            continue;
+
+        renderWindow(w.lock(), pRenderMonitor, time, true, RENDER_PASS_ALL);
+    }
+}
+
+void IHyprRenderer::renderPinnedWindowsForMonitor(PHLMONITOR pRenderMonitor, const Time::steady_tp& time) {
+    for (auto const& w : g_pCompositor->m_windows) {
+        if (w->isHidden() && !w->m_isMapped && !w->m_fadingOut)
+            continue;
+
+        if (!w->m_pinned || !w->m_isFloating)
+            continue;
+
+        if (!w->visibleOnMonitor(pRenderMonitor))
+            continue;
+
+        renderWindow(w, pRenderMonitor, time, true, RENDER_PASS_ALL);
+    }
+}
+
+void IHyprRenderer::renderVirtualMonitorWorkspaces(PHLMONITOR pMonitor, const std::vector<PHLMONITOR>& logicalMonitors, const Time::steady_tp& time) {
+    static auto PXPMODE          = CConfigValue<Config::INTEGER>("render:xp_mode");
+    static auto PSESSIONLOCKXRAY = CConfigValue<Config::INTEGER>("misc:session_lock_xray");
+
+    if UNLIKELY (g_pSessionLockManager->isSessionLocked() && !*PSESSIONLOCKXRAY) {
+        if (g_pSessionLockManager->shallConsiderLockMissing() || g_pSessionLockManager->clientLocked() || g_pSessionLockManager->clientDenied())
+            return;
+    }
+
+    auto renderLogicalLayers = [&](zwlrLayerShellV1Layer layer, bool popups = false) {
+        for (auto const& logicalMonitor : logicalMonitors) {
+            if (!logicalMonitor)
+                continue;
+
+            for (auto const& ls : logicalMonitor->m_layerSurfaceLayers[layer])
+                renderLayer(ls.lock(), pMonitor, time, popups);
+        }
+    };
+
+    if LIKELY (!*PXPMODE) {
+        renderBackground(pMonitor);
+
+        renderLogicalLayers(ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND);
+
+        Event::bus()->m_events.render.stage.emit(RENDER_POST_WALLPAPER);
+
+        renderLogicalLayers(ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM);
+    }
+
+    if (preBlurQueued(pMonitor))
+        m_renderPass.add(makeUnique<CPreBlurElement>());
+
+    for (auto const& logicalMonitor : logicalMonitors) {
+        if (!logicalMonitor || !logicalMonitor->m_activeWorkspace)
+            continue;
+
+        renderWorkspaceWindowsForMonitor(pMonitor, logicalMonitor, logicalMonitor->m_activeWorkspace, time);
+
+        if (logicalMonitor->m_activeSpecialWorkspace)
+            renderWorkspaceWindowsForMonitor(pMonitor, logicalMonitor, logicalMonitor->m_activeSpecialWorkspace, time);
+    }
+
+    renderPinnedWindowsForMonitor(pMonitor, time);
+
+    Event::bus()->m_events.render.stage.emit(RENDER_POST_WINDOWS);
+
+    renderLogicalLayers(ZWLR_LAYER_SHELL_V1_LAYER_TOP);
+
+    for (auto const& imep : g_pInputManager->m_relay.m_inputMethodPopups)
+        renderIMEPopup(imep.get(), pMonitor, time);
+
+    renderLogicalLayers(ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY);
+
+    renderLogicalLayers(ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND, true);
+    renderLogicalLayers(ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, true);
+    renderLogicalLayers(ZWLR_LAYER_SHELL_V1_LAYER_TOP, true);
+    renderLogicalLayers(ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, true);
+
+    renderDragIcon(pMonitor, time);
+}
+
+void IHyprRenderer::sendFrameEventsToMonitor(PHLMONITOR pMonitor, const std::vector<PHLMONITOR>& logicalMonitors, const Time::steady_tp& now) {
+    for (auto const& logicalMonitor : logicalMonitors) {
+        if (!logicalMonitor)
+            continue;
+
+        if (logicalMonitor->m_activeWorkspace)
+            sendFrameEventsToWorkspace(pMonitor, logicalMonitor->m_activeWorkspace, now);
+        if (logicalMonitor->m_activeSpecialWorkspace)
+            sendFrameEventsToWorkspace(pMonitor, logicalMonitor->m_activeSpecialWorkspace, now);
+    }
+}
+
 void IHyprRenderer::bindOffMain() {
     bindFB(m_renderData.pMonitor->resources()->getUnusedWorkBuffer());
     draw(CClearPassElement::SClearData{{0, 0, 0, 0}});
@@ -1954,6 +2120,9 @@ void IHyprRenderer::renderMirrored() {
 }
 
 void IHyprRenderer::renderMonitor(PHLMONITOR pMonitor, bool commit) {
+    if (pMonitor && pMonitor->isVirtual())
+        pMonitor = pMonitor->physicalMonitor();
+
     if (!pMonitor)
         return;
     static std::chrono::high_resolution_clock::time_point renderStart        = std::chrono::high_resolution_clock::now();
@@ -2008,9 +2177,12 @@ void IHyprRenderer::renderMonitor(PHLMONITOR pMonitor, bool commit) {
     if (!pMonitor->m_output->needsFrame && pMonitor->m_forceFullFrames == 0)
         return;
 
+    auto       logicalMonitors = g_pCompositor->getLogicalMonitorsFor(pMonitor);
+    const bool RENDERSPLIT     = std::ranges::any_of(logicalMonitors, [pMonitor](const auto& m) { return m != pMonitor; });
+
     // tearing and DS first
     bool       shouldTear              = pMonitor->updateTearing();
-    const bool canAttemptDirectScanout = pMonitor->canAttemptDirectScanoutFast();
+    const bool canAttemptDirectScanout = !RENDERSPLIT && pMonitor->canAttemptDirectScanoutFast();
 
     if (canAttemptDirectScanout) {
         if (pMonitor->attemptDirectScanout()) {
@@ -2117,7 +2289,10 @@ void IHyprRenderer::renderMonitor(PHLMONITOR pMonitor, bool commit) {
             renderCursor = false;
         } else {
             CBox renderBox = {0, 0, sc<int>(pMonitor->m_pixelSize.x), sc<int>(pMonitor->m_pixelSize.y)};
-            renderWorkspace(pMonitor, pMonitor->m_activeWorkspace, NOW, renderBox);
+            if (RENDERSPLIT)
+                renderVirtualMonitorWorkspaces(pMonitor, logicalMonitors, NOW);
+            else
+                renderWorkspace(pMonitor, pMonitor->m_activeWorkspace, NOW, renderBox);
 
             renderLockscreen(pMonitor, NOW, renderBox);
 
@@ -2146,16 +2321,28 @@ void IHyprRenderer::renderMonitor(PHLMONITOR pMonitor, bool commit) {
             }
         }
     } else if (!pMonitor->isMirror()) {
-        sendFrameEventsToWorkspace(pMonitor, pMonitor->m_activeWorkspace, NOW);
-        if (pMonitor->m_activeSpecialWorkspace)
-            sendFrameEventsToWorkspace(pMonitor, pMonitor->m_activeSpecialWorkspace, NOW);
+        if (RENDERSPLIT)
+            sendFrameEventsToMonitor(pMonitor, logicalMonitors, NOW);
+        else {
+            sendFrameEventsToWorkspace(pMonitor, pMonitor->m_activeWorkspace, NOW);
+            if (pMonitor->m_activeSpecialWorkspace)
+                sendFrameEventsToWorkspace(pMonitor, pMonitor->m_activeSpecialWorkspace, NOW);
+        }
     }
 
     renderCursor = renderCursor && shouldRenderCursor();
 
     if (renderCursor) {
         TRACY_GPU_ZONE("RenderCursor");
-        g_pPointerManager->renderSoftwareCursorsFor(pMonitor->m_self.lock(), NOW, m_renderData.damage);
+        if (RENDERSPLIT) {
+            for (auto const& logicalMonitor : logicalMonitors) {
+                if (!logicalMonitor)
+                    continue;
+
+                g_pPointerManager->renderSoftwareCursorsFor(logicalMonitor, NOW, m_renderData.damage, {}, false, logicalMonitor->m_position - pMonitor->m_position);
+            }
+        } else
+            g_pPointerManager->renderSoftwareCursorsFor(pMonitor->m_self.lock(), NOW, m_renderData.damage);
     }
 
     if (pMonitor->m_dpmsBlackOpacity->value() != 0.F) {
@@ -2603,7 +2790,15 @@ void IHyprRenderer::arrangeLayerArray(PHLMONITOR pMonitor, const std::vector<PHL
 }
 
 void IHyprRenderer::arrangeLayersForMonitor(const MONITORID& monitor) {
-    const auto PMONITOR = g_pCompositor->getMonitorFromID(monitor);
+    auto PMONITOR = g_pCompositor->getMonitorFromID(monitor);
+    if (!PMONITOR) {
+        for (auto const& m : g_pCompositor->m_realMonitors) {
+            if (m->m_id == monitor) {
+                PMONITOR = m;
+                break;
+            }
+        }
+    }
 
     if (!PMONITOR || PMONITOR->m_size.x <= 0 || PMONITOR->m_size.y <= 0)
         return;
@@ -2717,6 +2912,12 @@ void IHyprRenderer::damageWindow(PHLWINDOW pWindow, bool forceFull) {
 }
 
 void IHyprRenderer::damageMonitor(PHLMONITOR pMonitor) {
+    if (pMonitor && pMonitor->isVirtual())
+        pMonitor = pMonitor->physicalMonitor();
+
+    if (!pMonitor)
+        return;
+
     if (g_pCompositor->m_unsafeState || pMonitor->isMirror())
         return;
 
@@ -2733,7 +2934,10 @@ void IHyprRenderer::damageBox(const CBox& box, bool skipFrameSchedule) {
     if (g_pCompositor->m_unsafeState)
         return;
 
-    for (auto const& m : g_pCompositor->m_monitors) {
+    for (auto const& m : g_pCompositor->m_realMonitors) {
+        if (!m || !m->m_enabled)
+            continue;
+
         if (m->isMirror())
             continue; // don't damage mirrors traditionally
 

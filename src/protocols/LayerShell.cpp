@@ -220,7 +220,8 @@ void CLayerShellProtocol::destroyResource(CLayerShellResource* surf) {
 
 void CLayerShellProtocol::onGetLayerSurface(CZwlrLayerShellV1* pMgr, uint32_t id, wl_resource* surface, wl_resource* output, zwlrLayerShellV1Layer layer, std::string namespace_) {
     const auto CLIENT   = pMgr->client();
-    const auto PMONITOR = output ? CWLOutputResource::fromResource(output)->m_monitor.lock() : nullptr;
+    const auto OUTPUTM  = output ? CWLOutputResource::fromResource(output)->m_monitor.lock() : nullptr;
+    const auto PMONITOR = OUTPUTM && OUTPUTM->isVirtual() ? OUTPUTM : (OUTPUTM ? g_pCompositor->getPrimaryLogicalMonitor(OUTPUTM) : nullptr);
     auto       SURF     = CWLSurfaceResource::fromResource(surface);
 
     if UNLIKELY (!SURF) {

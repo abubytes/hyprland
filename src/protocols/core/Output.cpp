@@ -95,6 +95,25 @@ CWLOutputProtocol::CWLOutputProtocol(const wl_interface* iface, const int& ver, 
     });
 }
 
+void CWLOutputProtocol::updateMonitor(PHLMONITOR pMonitor) {
+    if (!pMonitor || m_defunct || pMonitor->m_name != m_name || m_monitor.lock() == pMonitor)
+        return;
+
+    m_monitor                = pMonitor;
+    m_listeners.modeChanged  = pMonitor->m_events.modeChanged.listen([this] {
+        for (auto const& o : m_outputs) {
+            o->updateState();
+        }
+    });
+
+    for (auto const& o : m_outputs) {
+        o->m_monitor = pMonitor;
+        o->updateState();
+    }
+
+    sendDone();
+}
+
 void CWLOutputProtocol::bindManager(wl_client* client, void* data, uint32_t ver, uint32_t id) {
     if UNLIKELY (m_defunct)
         Log::logger->log(Log::WARN, "[wl_output] Binding a wl_output that's inert?? Possible client bug.");

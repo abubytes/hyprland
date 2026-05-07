@@ -530,6 +530,7 @@ local __HL_LayerRuleSpec = {}
 ---@field sdr_min_luminance? number|boolean
 ---@field sdrbrightness? number|boolean
 ---@field sdrsaturation? number|boolean
+---@field split? string
 ---@field supports_hdr? integer|boolean
 ---@field supports_wide_color? integer|boolean
 ---@field transform? integer|boolean

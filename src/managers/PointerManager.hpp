@@ -54,7 +54,8 @@ class CPointerManager {
     bool hasVisibleHWCursor(PHLMONITOR pMonitor);
 
     void renderSoftwareCursorsFor(PHLMONITOR pMonitor, const Time::steady_tp& now, CRegion& damage /* logical */, std::optional<Vector2D> overridePos = {} /* monitor-local */,
-                                  bool forceRender = false);
+                                  bool forceRender = false, Vector2D renderOffset = {});
+    void onMonitorLayoutChange();
 
     // this is needed e.g. during screensharing where
     // the software cursors aren't locked during the cursor move, but they
@@ -93,7 +94,6 @@ class CPointerManager {
 
   private:
     void recheckPointerPosition();
-    void onMonitorLayoutChange();
     void onMonitorDisconnect();
     void updateCursorBackend();
     void onCursorMoved();
