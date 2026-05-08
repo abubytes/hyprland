@@ -1,0 +1,204 @@
+{
+  "blocks": [
+    {
+      "id": "morning",
+      "title": "Morning routine",
+      "durationMinutes": 30,
+      "autoComplete": false,
+      "plannedStartAt": "2026-05-07T06:00:00.000Z",
+      "workstationId": "morning",
+      "detail": "Wash, coffee, prayer mat, desk reset, and open the day plan.",
+      "appActions": [
+        {
+          "type": "focus-app",
+          "app": "Notion"
+        }
+      ]
+    },
+    {
+      "id": "quran",
+      "title": "Quran reading",
+      "durationMinutes": 35,
+      "autoComplete": false,
+      "plannedStartAt": "2026-05-07T06:30:00.000Z",
+      "workstationId": "quran",
+      "detail": "Quiet reading block before opening study material.",
+      "appActions": [
+        {
+          "type": "focus-app",
+          "app": "Zathura",
+          "document": "quran.pdf"
+        }
+      ]
+    },
+    {
+      "id": "study",
+      "title": "Study focus 1",
+      "durationMinutes": 50,
+      "autoComplete": true,
+      "plannedStartAt": "2026-05-07T07:05:00.000Z",
+      "detail": "First deep study pass. Stay on the study workstation.",
+      "policy": {
+        "lock": {
+          "mode": "hard",
+          "workstation": "study"
+        }
+      }
+    },
+    {
+      "id": "rest",
+      "title": "Rest 1",
+      "durationMinutes": 10,
+      "autoComplete": true,
+      "plannedStartAt": "2026-05-07T07:55:00.000Z",
+      "workstationId": "rest",
+      "detail": "Step away from the desk before the next focus block.",
+      "policy": {
+        "awayFromDesk": true
+      }
+    },
+    {
+      "id": "study-focus-2",
+      "title": "Study focus 2",
+      "durationMinutes": 50,
+      "autoComplete": true,
+      "plannedStartAt": "2026-05-07T08:05:00.000Z",
+      "detail": "Second deep study pass. Continue the same material.",
+      "policy": {
+        "lock": {
+          "mode": "hard",
+          "workstation": "study"
+        }
+      }
+    },
+    {
+      "id": "study-rest-2",
+      "title": "Rest 2",
+      "durationMinutes": 10,
+      "autoComplete": true,
+      "plannedStartAt": "2026-05-07T08:55:00.000Z",
+      "workstationId": "rest",
+      "detail": "Short reset after the second focus block.",
+      "policy": {
+        "awayFromDesk": true
+      }
+    },
+    {
+      "id": "study-focus-3",
+      "title": "Study focus 3",
+      "durationMinutes": 50,
+      "autoComplete": true,
+      "plannedStartAt": "2026-05-07T09:05:00.000Z",
+      "detail": "Final study pass before switching into tasks.",
+      "policy": {
+        "lock": {
+          "mode": "hard",
+          "workstation": "study"
+        }
+      }
+    },
+    {
+      "id": "free-tasks",
+      "title": "Free task block",
+      "durationMinutes": 30,
+      "autoComplete": false,
+      "plannedStartAt": "2026-05-07T09:55:00.000Z",
+      "workstationId": "free",
+      "detail": "Loose personal tasks that can be done without a hard lock."
+    },
+    {
+      "id": "work-tasks",
+      "title": "Work task block",
+      "durationMinutes": 90,
+      "autoComplete": false,
+      "plannedStartAt": "2026-05-07T10:25:00.000Z",
+      "workstationId": "work",
+      "detail": "Work execution after study blocks are complete.",
+      "tasks": [
+        {
+          "id": "task-export-compact",
+          "title": "Wire compact active-block timer fields",
+          "status": "in-progress"
+        },
+        {
+          "id": "task-free-inbox",
+          "title": "Clear quick personal errands",
+          "status": "undone"
+        },
+        {
+          "id": "task-work-followup",
+          "title": "Finish the work follow-up list",
+          "status": "undone"
+        },
+        {
+          "id": "task-morning",
+          "title": "Morning routine finished",
+          "status": "done"
+        },
+        {
+          "id": "task-quran",
+          "title": "Quran reading finished",
+          "status": "done"
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "id": "morning-to-quran",
+      "type": "autoStartNext",
+      "trigger": "done",
+      "from": "morning",
+      "to": "quran"
+    },
+    {
+      "id": "quran-to-study",
+      "type": "autoStartNext",
+      "trigger": "done",
+      "from": "quran",
+      "to": "study"
+    },
+    {
+      "id": "study-to-rest",
+      "type": "autoStartNext",
+      "trigger": "auto-complete",
+      "from": "study",
+      "to": "rest"
+    },
+    {
+      "id": "rest-to-study-focus-2",
+      "type": "autoStartNext",
+      "trigger": "auto-complete",
+      "from": "rest",
+      "to": "study-focus-2"
+    },
+    {
+      "id": "study-focus-2-to-study-rest-2",
+      "type": "autoStartNext",
+      "trigger": "auto-complete",
+      "from": "study-focus-2",
+      "to": "study-rest-2"
+    },
+    {
+      "id": "study-rest-2-to-study-focus-3",
+      "type": "autoStartNext",
+      "trigger": "auto-complete",
+      "from": "study-rest-2",
+      "to": "study-focus-3"
+    },
+    {
+      "id": "study-focus-3-to-free-tasks",
+      "type": "autoStartNext",
+      "trigger": "auto-complete",
+      "from": "study-focus-3",
+      "to": "free-tasks"
+    },
+    {
+      "id": "free-tasks-to-work-tasks",
+      "type": "autoStartNext",
+      "trigger": "done",
+      "from": "free-tasks",
+      "to": "work-tasks"
+    }
+  ]
+}

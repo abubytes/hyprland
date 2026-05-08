@@ -1,0 +1,46 @@
+[
+  {
+    "id": "task-done",
+    "url": "https://notion.example/task-done",
+    "last_edited_time": "2026-05-07T08:00:00.000Z",
+    "properties": [
+      { "name": "Name", "type": "title", "value": "Ship final notes" },
+      { "name": "Status", "type": "status", "value": "Done" },
+      { "name": "Due Date", "type": "date", "value": "2026-05-08" },
+      { "name": "Project", "type": "relation", "value": ["project-alpha"] }
+    ]
+  },
+  {
+    "id": "task-todo",
+    "url": "https://notion.example/task-todo",
+    "last_edited_time": "2026-05-07T08:00:00.000Z",
+    "properties": [
+      { "name": "Name", "type": "title", "value": "Backfill fixtures" },
+      { "name": "Status", "type": "status", "value": "Todo" },
+      { "name": "Due Date", "type": "date", "value": "2026-05-09" },
+      { "name": "Project", "type": "relation", "value": ["project-alpha"] }
+    ]
+  },
+  {
+    "id": "task-progress",
+    "url": "https://notion.example/task-progress",
+    "last_edited_time": "2026-05-07T08:00:00.000Z",
+    "properties": [
+      { "name": "Name", "type": "title", "value": "Wire cache sidecar" },
+      { "name": "Status", "type": "status", "value": "In Progress" },
+      { "name": "Planned", "type": "date", "value": "2026-05-08/2026-05-08" },
+      { "name": "Due Date", "type": "date", "value": "2026-05-08" },
+      { "name": "Project", "type": "relation", "value": ["project-alpha"] }
+    ]
+  },
+  {
+    "id": "task-blocked",
+    "url": "https://notion.example/task-blocked",
+    "last_edited_time": "2026-05-07T08:00:00.000Z",
+    "properties": [
+      { "name": "Name", "type": "title", "value": "Confirm timeblock target" },
+      { "name": "Status", "type": "status", "value": "Blocked" },
+      { "name": "Due Date", "type": "date", "value": "2026-05-10" }
+    ]
+  }
+]

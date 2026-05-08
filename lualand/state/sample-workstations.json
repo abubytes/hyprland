@@ -1,0 +1,57 @@
+{
+  "defaults": {
+    "hdmiMonitor": "HDMI-A-1",
+    "edpMonitor": "eDP-1",
+    "edpWorkspaceOffset": 100
+  },
+  "workstations": [
+    {
+      "id": "morning",
+      "name": "Morning",
+      "slot": 1,
+      "icon": "morning",
+      "numpadKey": "1"
+    },
+    {
+      "id": "quran",
+      "name": "Quran",
+      "slot": 2,
+      "icon": "quran",
+      "numpadKey": "2"
+    },
+    {
+      "id": "study",
+      "name": "Study",
+      "slot": 3,
+      "icon": "study",
+      "numpadKey": "3",
+      "edp": {
+        "mode": "extension"
+      }
+    },
+    {
+      "id": "free",
+      "name": "Free",
+      "slot": 4,
+      "icon": "docs",
+      "numpadKey": "4"
+    },
+    {
+      "id": "work",
+      "name": "Work",
+      "slot": 5,
+      "icon": "work",
+      "numpadKey": "5",
+      "edp": {
+        "mode": "extension"
+      }
+    },
+    {
+      "id": "rest",
+      "name": "Rest",
+      "slot": 6,
+      "icon": "rest",
+      "numpadKey": "6"
+    }
+  ]
+}

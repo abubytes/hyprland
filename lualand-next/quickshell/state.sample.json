@@ -1,0 +1,149 @@
+{
+  "dayLabel": "Fri May 8",
+  "updatedAt": "2026-05-08T02:40:00+03:00",
+  "bar": {
+    "time": "02:40",
+    "date": "Fri May 8",
+    "workspace": "12",
+    "workstation": "Code",
+    "block": "Quickshell passive pass"
+  },
+  "bars": {
+    "laptop": {
+      "time": "02:40",
+      "date": "Fri May 8",
+      "workspace": "12",
+      "workstation": "Code",
+      "block": "Quickshell passive pass"
+    },
+    "work": {
+      "time": "02:40",
+      "date": "Fri May 8",
+      "workspace": "12",
+      "workstation": "Code",
+      "block": "Quickshell passive pass"
+    }
+  },
+  "gm": {
+    "title": "GM",
+    "line1": "Laptop command widget is passive.",
+    "line2": "State is exported by the engine and watched from disk.",
+    "status": "ready"
+  },
+  "activeBlock": {
+    "name": "Quickshell passive pass",
+    "time": "02:00-04:00",
+    "workstation": "Code",
+    "remainingText": "54m",
+    "debtText": "12m debt",
+    "status": "active",
+    "primaryAction": "done",
+    "primaryLabel": "Done"
+  },
+  "timer": {
+    "state": "active",
+    "primaryAction": "done",
+    "primaryLabel": "Done",
+    "blockId": "quickshell-passive-pass",
+    "title": "Quickshell passive pass",
+    "canSkip": true,
+    "canDone": true,
+    "remainingMs": 3240000,
+    "overrunMs": 720000,
+    "remainingText": "54m left",
+    "debtText": "12m debt"
+  },
+  "workstations": [
+    {
+      "id": "code",
+      "label": "Code",
+      "short": "C",
+      "range": "11-20",
+      "active": true
+    },
+    {
+      "id": "docs",
+      "label": "Docs",
+      "short": "D",
+      "range": "21-30",
+      "active": false
+    },
+    {
+      "id": "ops",
+      "label": "Ops",
+      "short": "O",
+      "range": "31-40",
+      "active": false
+    },
+    {
+      "id": "study",
+      "label": "Study",
+      "short": "S",
+      "range": "41-50",
+      "active": false
+    },
+    {
+      "id": "rest",
+      "label": "Rest",
+      "short": "R",
+      "range": "51-60",
+      "active": false
+    }
+  ],
+  "timeline": [
+    {
+      "time": "00:30",
+      "title": "Read current surface",
+      "workstation": "Docs",
+      "status": "done",
+      "remainingText": ""
+    },
+    {
+      "time": "01:00",
+      "title": "Define state contract",
+      "workstation": "Code",
+      "status": "done",
+      "remainingText": ""
+    },
+    {
+      "time": "02:00",
+      "title": "Quickshell passive pass",
+      "workstation": "Code",
+      "status": "active",
+      "remainingText": "54m"
+    },
+    {
+      "time": "03:15",
+      "title": "Smoke against sample state",
+      "workstation": "Ops",
+      "status": "queued",
+      "remainingText": "18m"
+    },
+    {
+      "time": "04:00",
+      "title": "Hand off JSON exporter",
+      "workstation": "Docs",
+      "status": "queued",
+      "remainingText": "45m"
+    }
+  ],
+  "tasks": [
+    {
+      "title": "split passive QML components",
+      "done": true
+    },
+    {
+      "title": "watch only exported JSON",
+      "done": true
+    },
+    {
+      "title": "replace raster/icon work with text labels",
+      "done": true
+    },
+    {
+      "title": "run qs smoke script",
+      "done": false,
+      "status": "active"
+    }
+  ]
+}

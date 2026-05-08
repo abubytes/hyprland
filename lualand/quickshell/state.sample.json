@@ -1,0 +1,111 @@
+{
+  "dayLabel": "Thu May 7",
+  "summary": "Local sample state for the minimal Lualand Quickshell UI. Use LUALAND_QS_STATE with export-view for generated engine state.",
+  "activeBlock": {
+    "name": "Quickshell UI slice",
+    "time": "19:00-20:30",
+    "workstation": "Code",
+    "status": "active"
+  },
+  "workstations": [
+    {
+      "id": "code",
+      "label": "Code",
+      "short": "C",
+      "iconName": "applications-development",
+      "workspace": "11-20",
+      "active": true
+    },
+    {
+      "id": "docs",
+      "label": "Docs",
+      "short": "D",
+      "iconName": "accessories-text-editor",
+      "workspace": "21-30",
+      "active": false
+    },
+    {
+      "id": "ops",
+      "label": "Ops",
+      "short": "O",
+      "iconName": "utilities-terminal",
+      "workspace": "31-40",
+      "active": false
+    },
+    {
+      "id": "study",
+      "label": "Study",
+      "short": "S",
+      "iconName": "help-contents",
+      "workspace": "41-50",
+      "active": false
+    },
+    {
+      "id": "rest",
+      "label": "Rest",
+      "short": "R",
+      "iconName": "media-playback-pause",
+      "workspace": "51-60",
+      "active": false
+    }
+  ],
+  "timeline": [
+    {
+      "time": "06:30",
+      "title": "Boot and review",
+      "detail": "Check current day, open required workstations, confirm blockers.",
+      "workstation": "Ops",
+      "status": "done"
+    },
+    {
+      "time": "08:00",
+      "title": "Deep code block",
+      "detail": "Protected development time. Stay inside the active workstation.",
+      "workstation": "Code",
+      "status": "done"
+    },
+    {
+      "time": "10:00",
+      "title": "Notes and docs",
+      "detail": "Write exact decisions and commands before the context goes cold.",
+      "workstation": "Docs",
+      "status": "done"
+    },
+    {
+      "time": "11:30",
+      "title": "Break",
+      "detail": "No workstation lock. Clear the desk and step away.",
+      "workstation": "Rest",
+      "status": "done"
+    },
+    {
+      "time": "13:00",
+      "title": "Quickshell UI slice",
+      "detail": "Build the boxy right-side panel, rail, timeline, and task placeholder.",
+      "workstation": "Code",
+      "status": "active"
+    },
+    {
+      "time": "15:00",
+      "title": "Smoke checks",
+      "detail": "Run qmlformat and qs validation, then record exact failures.",
+      "workstation": "Ops",
+      "status": "queued"
+    },
+    {
+      "time": "16:00",
+      "title": "Adapter contract",
+      "detail": "Define the state JSON shape the JS engine will emit later.",
+      "workstation": "Docs",
+      "status": "queued"
+    },
+    {
+      "time": "17:00",
+      "title": "Task bridge",
+      "detail": "Wire real tasks after engine ownership is clear.",
+      "workstation": "Code",
+      "status": "queued"
+    }
+  ],
+  "tasks": []
+}

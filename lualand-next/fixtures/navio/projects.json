@@ -1,0 +1,22 @@
+[
+  {
+    "id": "project-alpha",
+    "url": "https://notion.example/project-alpha",
+    "last_edited_time": "2026-05-07T08:00:00.000Z",
+    "properties": [
+      { "name": "Name", "type": "title", "value": "Alpha Launch" },
+      { "name": "Status", "type": "status", "value": "In Progress" },
+      { "name": "Planned", "type": "date", "value": "2026-05-08" },
+      { "name": "Due Date", "type": "date", "value": "2026-05-11" }
+    ]
+  },
+  {
+    "id": "project-archive",
+    "url": "https://notion.example/project-archive",
+    "last_edited_time": "2026-05-06T08:00:00.000Z",
+    "properties": [
+      { "name": "Name", "type": "title", "value": "Archived Work" },
+      { "name": "Status", "type": "status", "value": "Done" }
+    ]
+  }
+]

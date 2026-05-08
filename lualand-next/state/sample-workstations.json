@@ -1,0 +1,38 @@
+{
+  "defaults": {
+    "hdmiMonitor": "work_main",
+    "edpMonitor": "laptop",
+    "edpWorkspaceOffset": 10000,
+    "includeEdp": true,
+    "edpMode": "mirror"
+  },
+  "workstations": [
+    { "name": "Slacking", "number": 1, "last_workspace": 4, "mapping": 1, "edp": { "mode": "extension" } },
+    { "name": "Studying", "number": 2, "last_workspace": 1, "mapping": 2, "last_workspace_external": 2 },
+    { "name": "Haulerz", "number": 3, "last_workspace": 1, "mapping": null, "last_workspace_external": 1 },
+    { "name": "Remote", "number": 4, "last_workspace": 1, "mapping": null, "last_workspace_external": 3 },
+    { "name": "Configuring", "number": 5, "last_workspace": 5, "mapping": 9, "last_workspace_external": 2 },
+    { "name": "Work", "number": 12, "last_workspace": 1, "mapping": null },
+    { "name": "German", "number": 18, "last_workspace": 1, "mapping": null },
+    { "name": "Shelloh", "number": 19, "last_workspace": 1, "mapping": null, "last_workspace_external": 1 },
+    { "name": "Sarah", "number": 20, "last_workspace": 1, "mapping": 7, "last_workspace_external": 2 },
+    { "name": "Wadud", "number": 26, "last_workspace": 2, "mapping": null },
+    { "name": "ADHD", "number": 28, "last_workspace": 4, "mapping": null },
+    { "name": "Productivity", "number": 30, "last_workspace": 1, "mapping": null, "last_workspace_external": 1, "edp": { "mode": "extension" } },
+    { "name": "Rzn", "number": 31, "last_workspace": 1, "mapping": null, "last_workspace_external": 1 },
+    { "name": "Sunny Valley", "number": 33, "last_workspace": 1, "mapping": null },
+    { "name": "Nasih", "number": 34, "last_workspace": 1, "mapping": 3, "last_workspace_external": 1 },
+    { "name": "TacTaxi", "number": 35, "last_workspace": 1, "mapping": null, "last_workspace_external": 1 },
+    { "name": "Mareen", "number": 36, "last_workspace": 1, "mapping": null, "last_workspace_external": 1 },
+    { "name": "Lama", "number": 37, "last_workspace": 2, "mapping": null },
+    { "name": "N-Saloons", "number": 39, "last_workspace": 2, "mapping": null, "last_workspace_external": 2 },
+    { "name": "Howdaj", "number": 40, "last_workspace": 1, "last_workspace_external": 2, "mapping": null },
+    { "name": "Malaria", "number": 41, "last_workspace": 1, "last_workspace_external": 1, "mapping": 6 },
+    { "name": "Mr-P1", "number": 43, "last_workspace": 1, "last_workspace_external": 1, "mapping": null },
+    { "name": "Mr-P2", "number": 44, "last_workspace": 3, "last_workspace_external": 1, "mapping": 5 },
+    { "name": "Etex", "number": 45, "last_workspace": 3, "last_workspace_external": 1, "mapping": null },
+    { "name": "LuLu", "number": 46, "last_workspace": 3, "last_workspace_external": 1, "mapping": null },
+    { "name": "Rafid", "number": 47, "last_workspace": 1, "last_workspace_external": 3, "mapping": 4 },
+    { "name": "Atheer", "number": 48, "last_workspace": 1, "last_workspace_external": 1, "mapping": 8 }
+  ]
+}
