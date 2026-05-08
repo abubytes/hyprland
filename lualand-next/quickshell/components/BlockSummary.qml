@@ -19,23 +19,25 @@ Rectangle {
     }
 
     color: root.colors.surface2
-    border.color: root.colors.line
-    border.width: 1
+    border.color: "transparent"
+    border.width: 0
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 8
-        spacing: 3
+        anchors.margins: 0
+        spacing: 0
 
         RowLayout {
             Layout.fillWidth: true
+            Layout.leftMargin: 4
+            Layout.rightMargin: 4
             spacing: 6
 
             Text {
                 Layout.fillWidth: true
                 color: root.colors.ink
                 font.bold: true
-                font.pixelSize: 13
+                font.pixelSize: 12
                 elide: Text.ElideRight
                 text: root.block.name || "idle"
             }
@@ -44,7 +46,7 @@ Rectangle {
                 id: actionButton
 
                 Layout.preferredWidth: visible ? Math.max(58, actionText.implicitWidth + 16) : 0
-                Layout.preferredHeight: 22
+                Layout.preferredHeight: 20
                 visible: root.actionLabel !== ""
                 color: actionMouse.pressed ? root.colors.accent : (actionMouse.containsMouse ? root.colors.surface : root.colors.paper)
                 border.color: root.actionEnabled ? root.colors.accent : root.colors.line
@@ -57,7 +59,7 @@ Rectangle {
                     color: actionMouse.pressed ? root.colors.paper : (root.actionEnabled ? root.colors.accent : root.colors.muted)
                     font.bold: true
                     font.family: "monospace"
-                    font.pixelSize: 10
+                    font.pixelSize: 9
                     text: root.actionLabel
                 }
 
@@ -75,6 +77,8 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
+            Layout.leftMargin: 4
+            Layout.rightMargin: 4
             spacing: 5
 
             Text {
@@ -92,27 +96,6 @@ Rectangle {
                 font.family: "monospace"
                 font.pixelSize: 11
                 text: root.block.remainingText || "--m"
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 5
-
-            Text {
-                Layout.fillWidth: true
-                color: root.colors.bad
-                font.family: "monospace"
-                font.pixelSize: 10
-                elide: Text.ElideRight
-                text: root.block.debtText || "0m debt"
-            }
-
-            Text {
-                color: root.colors.good
-                font.family: "monospace"
-                font.pixelSize: 10
-                text: root.block.status || "passive"
             }
         }
     }

@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 
 Item {
@@ -7,8 +6,6 @@ Item {
 
     required property var colors
     required property var shellState
-    property string screenLabel: "screen"
-    property string statePath: ""
     property string actionScript: ""
     readonly property var state: shellState || ({})
     readonly property var activeBlock: state.activeBlock || ({})
@@ -17,26 +14,19 @@ Item {
     readonly property var timeline: Array.isArray(state.timeline) ? state.timeline : []
     readonly property var tasks: Array.isArray(state.tasks) ? state.tasks : []
 
-    Rectangle {
-        anchors.fill: parent
-        color: root.colors.paper
-        border.color: root.colors.line
-        border.width: 1
-    }
-
     RowLayout {
         anchors.fill: parent
-        anchors.margins: 6
-        spacing: 5
+        anchors.margins: 0
+        spacing: 0
 
         ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 5
+            spacing: 0
 
             BlockSummary {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 76
+                Layout.preferredHeight: 50
                 colors: root.colors
                 block: root.activeBlock
                 timer: root.timer
@@ -45,40 +35,9 @@ Item {
 
             TaskList {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 142
+                Layout.preferredHeight: 112
                 colors: root.colors
                 tasks: root.tasks
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 22
-                color: root.colors.surface2
-                border.color: root.colors.line
-                border.width: 1
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 7
-                    anchors.rightMargin: 7
-                    spacing: 8
-
-                    Text {
-                        Layout.fillWidth: true
-                        color: root.colors.ink
-                        font.bold: true
-                        font.family: "monospace"
-                        font.pixelSize: 10
-                        text: "timeline"
-                    }
-
-                    Text {
-                        color: root.colors.accent
-                        font.family: "monospace"
-                        font.pixelSize: 10
-                        text: root.timeline.length + " rows"
-                    }
-                }
             }
 
             Flickable {
@@ -91,12 +50,16 @@ Item {
                 boundsBehavior: Flickable.StopAtBounds
                 contentWidth: width
                 contentHeight: timelineColumn.implicitHeight
+                readonly property real scrollRange: Math.max(0, contentHeight - height)
+                readonly property real scrollProgress: scrollRange <= 0
+                    ? 0
+                    : Math.max(0, Math.min(1, contentY / scrollRange))
 
                 Column {
                     id: timelineColumn
 
-                    width: Math.max(1, timelineFlick.width - 10)
-                    spacing: 2
+                    width: Math.max(1, timelineFlick.width - 1)
+                    spacing: 0
 
                     Repeater {
                         model: root.timeline
@@ -111,23 +74,19 @@ Item {
                     }
                 }
 
-                ScrollBar.vertical: ScrollBar {
-                    policy: ScrollBar.AlwaysOn
+                Rectangle {
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    width: 1
+                    height: timelineFlick.scrollRange <= 0 ? 0 : Math.max(2, timelineFlick.height * timelineFlick.scrollProgress)
+                    color: root.colors.accent
+                    visible: timelineFlick.scrollRange > 0
                 }
-            }
-
-            Text {
-                Layout.fillWidth: true
-                color: root.colors.muted
-                font.family: "monospace"
-                font.pixelSize: 9
-                elide: Text.ElideMiddle
-                text: root.screenLabel + " / " + root.statePath
             }
         }
 
         WorkstationRail {
-            Layout.preferredWidth: 48
+            Layout.preferredWidth: 86
             Layout.fillHeight: true
             colors: root.colors
             workstations: root.workstations

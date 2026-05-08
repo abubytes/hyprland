@@ -6,7 +6,6 @@ Rectangle {
 
     required property var colors
     property var bar: ({})
-    property string screenLabel: "screen"
 
     color: root.colors.paper
     border.color: root.colors.line
@@ -17,16 +16,6 @@ Rectangle {
         anchors.leftMargin: 8
         anchors.rightMargin: 8
         spacing: 10
-
-        Text {
-            Layout.preferredWidth: 92
-            color: root.colors.accent
-            font.bold: true
-            font.family: "monospace"
-            font.pixelSize: 11
-            elide: Text.ElideRight
-            text: root.screenLabel
-        }
 
         Text {
             color: root.colors.ink

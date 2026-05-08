@@ -14,8 +14,7 @@ ShellRoot {
     id: root
 
     readonly property int barHeight: 30
-    readonly property int panelWidth: 398
-    readonly property int panelHeight: 760
+    readonly property int infoBarHeight: 520
     readonly property int gmHeight: 170
     readonly property string actionScript: "/home/marv/code/new-hyprland/lualand-next/scripts/timeblock-action.sh"
     readonly property var colors: ({
@@ -239,7 +238,6 @@ ShellRoot {
                 anchors.fill: parent
                 colors: root.colors
                 bar: root.shellState.bar || ({})
-                screenLabel: topPanel.modelData ? topPanel.modelData.name : "screen"
             }
         }
     }
@@ -253,8 +251,7 @@ ShellRoot {
             required property var modelData
 
             screen: modelData
-            implicitWidth: root.panelWidth
-            implicitHeight: root.panelHeight
+            implicitHeight: root.infoBarHeight
             color: "transparent"
             aboveWindows: true
             focusable: false
@@ -264,20 +261,14 @@ ShellRoot {
 
             anchors {
                 top: true
+                left: true
                 right: true
-                bottom: true
-            }
-
-            margins {
-                top: root.barHeight
             }
 
             LualandNext.SidePanel {
                 anchors.fill: parent
                 colors: root.colors
                 shellState: root.shellState
-                screenLabel: panel.modelData ? panel.modelData.name : "screen"
-                statePath: root.statePath
                 actionScript: root.actionScript
             }
         }

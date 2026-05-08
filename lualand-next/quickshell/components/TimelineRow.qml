@@ -5,20 +5,21 @@ Rectangle {
     id: root
 
     required property var colors
+    required property int index
     property var entry: ({})
     readonly property bool active: entry.status === "active"
     readonly property bool done: entry.status === "done"
 
-    implicitHeight: 24
-    color: active ? root.colors.surface2 : "transparent"
+    implicitHeight: 20
+    color: active ? root.colors.surface2 : (index % 2 === 0 ? root.colors.paper : root.colors.surface)
     border.color: "transparent"
     border.width: 0
 
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: 4
-        anchors.rightMargin: 4
-        spacing: 4
+        anchors.leftMargin: 3
+        anchors.rightMargin: 3
+        spacing: 3
 
         Text {
             Layout.preferredWidth: 38
@@ -48,13 +49,13 @@ Rectangle {
         }
 
         Text {
-            Layout.preferredWidth: 48
-            color: root.entry.debtText ? root.colors.bad : root.colors.accent
+            Layout.preferredWidth: 42
+            color: root.colors.accent
             font.family: "monospace"
             font.pixelSize: 9
             horizontalAlignment: Text.AlignRight
             elide: Text.ElideRight
-            text: root.entry.remainingText || root.entry.debtText || root.entry.workstation || ""
+            text: root.entry.remainingText || ""
         }
     }
 }

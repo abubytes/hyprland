@@ -192,11 +192,24 @@ function buildWorkstations(workstationModel, options) {
     id: workstation.id,
     label: workstation.name,
     short: workstation.short || workstation.name.slice(0, 1).toUpperCase(),
-    iconName: workstation.iconName || workstation.icon || "applications-other",
+    iconName: workstation.iconName || workstation.icon || deriveWorkstationIcon(workstation),
     workspace: formatWorkspaceRange(workstation.hdmiWorkspaces.length > 0 ? workstation.hdmiWorkspaces : workstation.workspaces),
     range: formatWorkspaceRange(workstation.hdmiWorkspaces.length > 0 ? workstation.hdmiWorkspaces : workstation.workspaces),
     active: workstation.id === options.activeWorkstationId,
   }));
+}
+
+function deriveWorkstationIcon(workstation) {
+  const name = `${workstation.id || ""} ${workstation.name || ""}`.toLowerCase();
+  if (name.includes("study") || name.includes("german") || name.includes("anki")) return "accessories-dictionary";
+  if (name.includes("slack") || name.includes("remote")) return "internet-web-browser";
+  if (name.includes("productivity") || name.includes("config")) return "emblem-system";
+  if (name.includes("shell") || name.includes("rzn")) return "utilities-terminal";
+  if (name.includes("work") || name.includes("haulerz") || name.includes("rafid")) return "applications-development";
+  if (name.includes("sarah") || name.includes("wadud") || name.includes("lama")) return "x-office-address-book";
+  if (name.includes("howdaj") || name.includes("mareen") || name.includes("atheer")) return "applications-internet";
+  if (name.includes("adhd") || name.includes("morning") || name.includes("rest")) return "appointment-soon";
+  return "folder";
 }
 
 function buildTimeline(engineState, workstationModel, options) {
