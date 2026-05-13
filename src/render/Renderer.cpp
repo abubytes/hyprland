@@ -1201,14 +1201,17 @@ void IHyprRenderer::renderIMEPopup(CInputPopup* pPopup, PHLMONITOR pMonitor, con
         &renderdata);
 }
 
-void IHyprRenderer::renderSessionLockSurface(WP<SSessionLockSurface> pSurface, PHLMONITOR pMonitor, const Time::steady_tp& time) {
-    CSurfacePassElement::SRenderData renderdata = {pMonitor, time, pMonitor->m_position, pMonitor->m_position};
+void IHyprRenderer::renderSessionLockSurface(WP<SSessionLockSurface> pSurface, PHLMONITOR pRenderMonitor, PHLMONITOR pLogicalMonitor, const Time::steady_tp& time) {
+    if (!pRenderMonitor || !pLogicalMonitor)
+        return;
+
+    CSurfacePassElement::SRenderData renderdata = {pRenderMonitor, time, pLogicalMonitor->m_position, pLogicalMonitor->m_position};
 
     renderdata.blur     = false;
     renderdata.surface  = pSurface->surface->surface();
     renderdata.decorate = false;
-    renderdata.w        = pMonitor->m_size.x;
-    renderdata.h        = pMonitor->m_size.y;
+    renderdata.w        = pLogicalMonitor->m_size.x;
+    renderdata.h        = pLogicalMonitor->m_size.y;
 
     renderdata.surface->breadthfirst(
         [this, &renderdata, &pSurface](SP<CWLSurfaceResource> s, const Vector2D& offset, void* data) {
@@ -1792,24 +1795,46 @@ void IHyprRenderer::renderLockscreen(PHLMONITOR pMonitor, const Time::steady_tp&
     if (RENDERPRIMER)
         renderSessionLockPrimer(pMonitor);
 
-    const auto PSLS              = g_pSessionLockManager->getSessionLockSurfaceForMonitor(pMonitor->m_id);
-    const bool RENDERLOCKMISSING = (PSLS.expired() || g_pSessionLockManager->clientDenied()) && g_pSessionLockManager->shallConsiderLockMissing();
+    auto logicalMonitors = g_pCompositor->getLogicalMonitorsFor(pMonitor);
+    if (logicalMonitors.empty())
+        logicalMonitors.emplace_back(pMonitor);
 
-    ensureLockTexturesRendered(RENDERLOCKMISSING);
+    bool                                                        renderLockMissing = g_pSessionLockManager->clientDenied() && g_pSessionLockManager->shallConsiderLockMissing();
 
-    if (RENDERLOCKMISSING)
+    std::vector<std::pair<PHLMONITOR, WP<SSessionLockSurface>>> lockSurfaces;
+    lockSurfaces.reserve(logicalMonitors.size());
+
+    for (auto const& logicalMonitor : logicalMonitors) {
+        if (!logicalMonitor)
+            continue;
+
+        const auto PSLS = g_pSessionLockManager->getSessionLockSurfaceForMonitor(logicalMonitor->m_id);
+        if (PSLS.expired() && g_pSessionLockManager->shallConsiderLockMissing())
+            renderLockMissing = true;
+
+        lockSurfaces.emplace_back(logicalMonitor, PSLS);
+    }
+
+    ensureLockTexturesRendered(renderLockMissing);
+
+    if (renderLockMissing)
         renderSessionLockMissing(pMonitor);
-    else if (PSLS) {
-        renderSessionLockSurface(PSLS, pMonitor, now);
-        g_pSessionLockManager->onLockscreenRenderedOnMonitor(pMonitor->m_id);
+
+    for (auto const& [logicalMonitor, PSLS] : lockSurfaces) {
+        if (!logicalMonitor || PSLS.expired())
+            continue;
+
+        renderSessionLockSurface(PSLS, pMonitor, logicalMonitor, now);
+        g_pSessionLockManager->onLockscreenRenderedOnMonitor(logicalMonitor->m_id);
 
         // render layers and then their popups for abovelock rule
-        for (auto const& lsl : pMonitor->m_layerSurfaceLayers) {
+        for (auto const& lsl : logicalMonitor->m_layerSurfaceLayers) {
             for (auto const& ls : lsl) {
                 renderLayer(ls.lock(), pMonitor, now, false, true);
             }
         }
-        for (auto const& lsl : pMonitor->m_layerSurfaceLayers) {
+
+        for (auto const& lsl : logicalMonitor->m_layerSurfaceLayers) {
             for (auto const& ls : lsl) {
                 renderLayer(ls.lock(), pMonitor, now, true, true);
             }
@@ -2226,8 +2251,15 @@ void IHyprRenderer::renderMonitor(PHLMONITOR pMonitor, bool commit) {
     pMonitor->m_renderingActive = true;
 
     // Most frames have no fading-out windows or layers for this monitor.
-    if (!g_pCompositor->m_windowsFadingOut.empty() || !g_pCompositor->m_surfacesFadingOut.empty())
-        g_pCompositor->cleanupFadingOut(pMonitor->m_id);
+    if (!g_pCompositor->m_windowsFadingOut.empty() || !g_pCompositor->m_surfacesFadingOut.empty()) {
+        if (RENDERSPLIT) {
+            for (auto const& logicalMonitor : logicalMonitors) {
+                if (logicalMonitor)
+                    g_pCompositor->cleanupFadingOut(logicalMonitor->m_id);
+            }
+        } else
+            g_pCompositor->cleanupFadingOut(pMonitor->m_id);
+    }
 
     // TODO: this is getting called with extents being 0,0,0,0 should it be?
     // potentially can save on resources.

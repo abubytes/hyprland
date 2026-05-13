@@ -82,6 +82,14 @@
 #include <vector>
 #include <hyprutils/memory/UniquePtr.hpp>
 
+static bool monitorPublishesLogicalOutputs(PHLMONITOR pMonitor) {
+    if (!pMonitor || pMonitor->isVirtual())
+        return false;
+
+    const auto& RULE = pMonitor->m_activeMonitorRule;
+    return !RULE.m_splitAreas.empty() || !RULE.m_splitColumns.empty() || !RULE.m_splitRows.empty() || RULE.m_split.x > 1 || RULE.m_split.y > 1;
+}
+
 // ********************************************************************************************
 // * IMPORTANT: make sure to .reset() any protocol UP's you create! (put reset in destructor) *
 // * otherwise Hyprland might crash when exiting.                                             *
@@ -107,6 +115,9 @@ void CProtocolManager::onMonitorModeChange(PHLMONITOR pMonitor) {
 
 void CProtocolManager::ensureOutputForMonitor(PHLMONITOR pMonitor) {
     if (!pMonitor || pMonitor->isMirror() || pMonitor == g_pCompositor->m_unsafeOutput)
+        return;
+
+    if (monitorPublishesLogicalOutputs(pMonitor))
         return;
 
     if (PROTO::outputs.contains(pMonitor->m_name)) {

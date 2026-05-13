@@ -1243,7 +1243,15 @@ void CCompositor::rebuildVirtualMonitors() {
     if (m_isShuttingDown)
         return;
 
+    // Virtual monitors are rebuilt below the physical output lifecycle. If they need
+    // observable add/remove semantics later, diff previous/current virtual names and
+    // replay the relevant effects from CMonitor::onConnect/onDisconnect
+    // (helpers/Monitor.cpp): monitor preAdded/added/removed events, IPC events, and
+    // disconnect cleanup. monitor.added listeners in PointerManager, Fifo,
+    // LinuxDMABUF, ExtWorkspace, and Lua config will not see newly materialized
+    // virtual monitors unless those hooks are emitted or explicitly resynced.
     std::unordered_map<std::string, PHLWORKSPACE> previousActiveWorkspaces;
+    std::unordered_map<std::string, PHLMONITOR>   previousVirtualMonitors;
     std::string                                   previousFocusedMonitor;
 
     if (const auto FOCUSED = Desktop::focusState()->monitor())
@@ -1252,6 +1260,9 @@ void CCompositor::rebuildVirtualMonitors() {
     for (auto const& m : m_monitors) {
         if (m && m->m_activeWorkspace)
             previousActiveWorkspaces[m->m_name] = m->m_activeWorkspace;
+
+        if (m && m->isVirtual())
+            previousVirtualMonitors[m->m_name] = m;
     }
 
     for (auto const& m : m_realMonitors) {
@@ -1306,10 +1317,10 @@ void CCompositor::rebuildVirtualMonitors() {
 
     auto resolveTracks = [](const std::vector<Config::CMonitorRule::SSplitTrack>& tracks_, double total) -> std::vector<double> {
         const std::vector<Config::CMonitorRule::SSplitTrack> defaultTracks = {Config::CMonitorRule::SSplitTrack{}};
-        const auto&                                         tracks        = tracks_.empty() ? defaultTracks : tracks_;
+        const auto&                                          tracks        = tracks_.empty() ? defaultTracks : tracks_;
 
-        double fixed = 0;
-        double weight = 0;
+        double                                               fixed  = 0;
+        double                                               weight = 0;
         for (const auto& track : tracks) {
             if (track.type == Config::CMonitorRule::SSplitTrack::TRACK_PIXELS)
                 fixed += track.value;
@@ -1319,8 +1330,8 @@ void CCompositor::rebuildVirtualMonitors() {
                 weight += track.value;
         }
 
-        const double FIXED_SCALE = fixed > total && fixed > 0 ? total / fixed : 1.0;
-        const double REMAINING   = std::max(0.0, total - fixed * FIXED_SCALE);
+        const double        FIXED_SCALE = fixed > total && fixed > 0 ? total / fixed : 1.0;
+        const double        REMAINING   = std::max(0.0, total - fixed * FIXED_SCALE);
 
         std::vector<double> edges;
         edges.reserve(tracks.size() + 1);
@@ -1427,15 +1438,31 @@ void CCompositor::rebuildVirtualMonitors() {
         for (size_t i = 0; i < SPLIT_AREAS.size(); ++i) {
             const auto& AREA  = SPLIT_AREAS[i];
             const int   INDEX = sc<int>(i);
+            const auto  NAME  = AREA.suffix.empty() ? std::format("{}~{}", realMonitor->m_name, INDEX + 1) : std::format("{}~{}", realMonitor->m_name, AREA.suffix);
 
-            auto monitor                  = makeShared<CMonitor>(realMonitor->m_output);
-            monitor->m_self              = monitor;
+            PHLMONITOR  monitor;
+            if (const auto IT = previousVirtualMonitors.find(NAME); IT != previousVirtualMonitors.end() && IT->second && IT->second->physicalMonitor() == realMonitor) {
+                monitor = IT->second;
+
+                // Reusing the CMonitor keeps existing layer-shell clients attached to
+                // the same logical output. If split topology changes size/scale/transform
+                // under a mapped layer, audit CLayerSurface::create/onMap/onUnmap
+                // (desktop/view/LayerSurface.cpp): map-time wl_surface.enter and
+                // preferred scale/transform are not replayed just by preserving
+                // m_layerSurfaceLayers.
+                for (auto& layer : monitor->m_layerSurfaceLayers)
+                    std::erase_if(layer, [](const auto& ls) { return ls.expired(); });
+            } else {
+                monitor         = makeShared<CMonitor>(realMonitor->m_output);
+                monitor->m_self = monitor;
+            }
+
             monitor->m_isVirtual         = true;
             monitor->m_parentMonitor     = realMonitor;
             monitor->m_virtualIndex      = INDEX;
             monitor->m_enabled           = true;
             monitor->m_dpmsStatus        = realMonitor->m_dpmsStatus;
-            monitor->m_name              = AREA.suffix.empty() ? std::format("{}~{}", realMonitor->m_name, INDEX + 1) : std::format("{}~{}", realMonitor->m_name, AREA.suffix);
+            monitor->m_name              = NAME;
             monitor->m_description       = realMonitor->m_description;
             monitor->m_shortDescription  = realMonitor->m_shortDescription;
             monitor->m_id                = BASE_ID + INDEX;
@@ -1444,12 +1471,16 @@ void CCompositor::rebuildVirtualMonitors() {
             monitor->m_transform         = realMonitor->m_transform;
             monitor->m_refreshRate       = realMonitor->m_refreshRate;
             monitor->m_activeMonitorRule = realMonitor->m_activeMonitorRule;
-            monitor->m_reservedArea      = realMonitor->m_reservedArea;
-            monitor->m_cmType            = realMonitor->m_cmType;
-            monitor->m_sdrEotf           = realMonitor->m_sdrEotf;
-            monitor->m_sdrSaturation     = realMonitor->m_sdrSaturation;
-            monitor->m_sdrBrightness     = realMonitor->m_sdrBrightness;
-            monitor->m_imageDescription  = realMonitor->m_imageDescription;
+            // This copies the physical monitor's static reserved area only. Dynamic
+            // layer-shell reservations are restored later by arrangeLayersForMonitor()
+            // (render/Renderer.cpp), which also invalidates workspace work areas via
+            // CLayoutManager::invalidateMonitorGeometries().
+            monitor->m_reservedArea     = realMonitor->m_reservedArea;
+            monitor->m_cmType           = realMonitor->m_cmType;
+            monitor->m_sdrEotf          = realMonitor->m_sdrEotf;
+            monitor->m_sdrSaturation    = realMonitor->m_sdrSaturation;
+            monitor->m_sdrBrightness    = realMonitor->m_sdrBrightness;
+            monitor->m_imageDescription = realMonitor->m_imageDescription;
 
             monitor->m_position        = realMonitor->m_position + AREA.offset;
             monitor->m_size            = AREA.size;
@@ -1467,6 +1498,10 @@ void CCompositor::rebuildVirtualMonitors() {
         if (!realMonitor || realMonitor->m_virtualMonitors.empty())
             continue;
 
+        // Workspace moves here are narrower than CMonitor::onConnect() recovery.
+        // If persistent or hidden workspaces show stale geometry later, compare this
+        // to CLayoutManager::invalidateMonitorGeometries() and CSpace::recheckWorkArea()
+        // rather than only recalculating the active workspace.
         for (auto const& logicalRef : realMonitor->m_virtualMonitors) {
             const auto LOGICAL = logicalRef.lock();
             if (!LOGICAL)
@@ -1518,12 +1553,26 @@ void CCompositor::rebuildVirtualMonitors() {
     if ((!Desktop::focusState()->monitor() || std::ranges::find(m_monitors, Desktop::focusState()->monitor()) == m_monitors.end()) && !m_monitors.empty())
         Desktop::focusState()->rawMonitorFocus(m_monitors.front());
 
-    for (auto const& m : m_monitors)
+    for (auto const& m : m_monitors) {
+        // Keep layer exclusive zones and workspace work areas coherent after copying
+        // monitor state above. This mirrors the arrange/recalculate tail in
+        // CMonitor::onConnect() and covers the reload case where layer surfaces already
+        // exist before the virtual monitor list is rebuilt.
+        g_pHyprRenderer->arrangeLayersForMonitor(m->m_id);
         g_layoutManager->recalculateMonitor(m);
+    }
 
+    // Physical output changes also adjust pointer/output protocol state. If cursor
+    // focus or layer hit-testing gets stale after a split change, compare this with
+    // CPointerManager::onMonitorLayoutChange(), CInputManager::simulateMouseMovement(),
+    // and vectorToWindowUnified()/layer hit tests.
     if (g_pPointerManager)
         g_pPointerManager->onMonitorLayoutChange();
 
+    // wl_output/xdg-output are resynced from logical m_monitors here. Note that
+    // zwlr_output_manager/output-management still enumerates m_realMonitors
+    // (protocols/OutputManagement.cpp), so split outputs may remain intentionally
+    // non-configurable through that protocol until it is taught about logical heads.
     if (g_pProtocolManager)
         g_pProtocolManager->syncOutputsWithMonitorLayout();
 
@@ -1531,6 +1580,15 @@ void CCompositor::rebuildVirtualMonitors() {
         PROTO::xdgOutput->updateAllOutputs();
 
     Event::bus()->m_events.monitor.layoutChanged.emit();
+
+    // Other virtual-monitor follow-ups to audit before expanding this path:
+    // - CMonitor::onDisconnect() cleanup is not replayed for removed virtual names.
+    // - Fullscreen layer flags/fades may need the same reset paths used by
+    //   CMonitor::changeWorkspace() and CCompositor::setWindowFullscreenInternal().
+    // - Rendering/damage intentionally collapses virtual monitor frames to the physical
+    //   output via scheduleFrameForMonitor(), CMonitor::addDamage(), and renderMonitor().
+    // - hyprctl monitors uses m_monitors, but "monitors all", DPMS, output-management,
+    //   and monitor ID allocation still use m_realMonitors in several control paths.
 }
 
 SP<CWLSurfaceResource> CCompositor::vectorToLayerPopupSurface(const Vector2D& pos, PHLMONITOR monitor, Vector2D* sCoords, PHLLS* ppLayerSurfaceFound) {

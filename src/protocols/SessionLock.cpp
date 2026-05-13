@@ -4,6 +4,7 @@
 #include "LockNotify.hpp"
 #include "core/Compositor.hpp"
 #include "core/Output.hpp"
+#include "../Compositor.hpp"
 #include "../helpers/Monitor.hpp"
 #include "../render/Renderer.hpp"
 #include "../desktop/state/FocusState.hpp"
@@ -209,7 +210,8 @@ void CSessionLockProtocol::onGetLockSurface(CExtSessionLockV1* lock, uint32_t id
         LOGM(Log::ERR, "onGetLockSurface: invalid output resource");
         return;
     }
-    auto PMONITOR = OUTPUTRES->m_monitor.lock();
+    const auto OUTPUTM  = OUTPUTRES->m_monitor.lock();
+    auto       PMONITOR = OUTPUTM && OUTPUTM->isVirtual() ? OUTPUTM : (OUTPUTM ? g_pCompositor->getPrimaryLogicalMonitor(OUTPUTM) : nullptr);
     if (!PMONITOR) {
         LOGM(Log::ERR, "onGetLockSurface: monitor is gone for output resource");
         return;

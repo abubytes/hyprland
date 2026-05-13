@@ -80,11 +80,20 @@ CLayerSurface::~CLayerSurface() {
     if (m_wlSurface)
         m_wlSurface->unassign();
 
-    for (auto const& mon : g_pCompositor->m_realMonitors) {
+    auto removeFromMonitor = [this](const PHLMONITOR& mon) {
+        if (!mon)
+            return;
+
         for (auto& lsl : mon->m_layerSurfaceLayers) {
             std::erase_if(lsl, [this](auto& ls) { return ls.expired() || ls.get() == this; });
         }
-    }
+    };
+
+    for (auto const& mon : g_pCompositor->m_monitors)
+        removeFromMonitor(mon);
+
+    for (auto const& mon : g_pCompositor->m_realMonitors)
+        removeFromMonitor(mon);
 }
 
 eViewType CLayerSurface::type() const {

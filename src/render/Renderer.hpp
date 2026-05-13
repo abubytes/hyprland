@@ -252,7 +252,7 @@ namespace Render {
         void renderAllClientsForWorkspace(PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const Vector2D& translate = {0, 0}, const float& scale = 1.f);
         void renderWindow(PHLWINDOW, PHLMONITOR, const Time::steady_tp&, bool, eRenderPassMode, bool ignorePosition = false, bool standalone = false);
         void renderLayer(PHLLS, PHLMONITOR, const Time::steady_tp&, bool popups = false, bool lockscreen = false);
-        void renderSessionLockSurface(WP<SSessionLockSurface>, PHLMONITOR, const Time::steady_tp&);
+        void renderSessionLockSurface(WP<SSessionLockSurface>, PHLMONITOR, PHLMONITOR, const Time::steady_tp&);
         void renderDragIcon(PHLMONITOR, const Time::steady_tp&);
         void renderIMEPopup(CInputPopup*, PHLMONITOR, const Time::steady_tp&);
         void sendFrameEventsToWorkspace(PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace,
