@@ -82,6 +82,7 @@ namespace Render {
         std::tuple<float, float, float>     getRenderTimes(PHLMONITOR pMonitor); // avg max min
         void                                ensureLockTexturesRendered(bool load);
         void                                renderLockscreen(PHLMONITOR pMonitor, const Time::steady_tp& now, const CBox& geometry);
+        void                                renderLogicalMonitorForScreencopy(PHLMONITOR pMonitor, const Time::steady_tp& now);
         void                                setCursorSurface(SP<Desktop::View::CWLSurface> surf, int hotspotX, int hotspotY, bool force = false);
         void                                setCursorFromName(const std::string& name, bool force = false);
         void                                onRenderbufferDestroy(IRenderbuffer* rb);
@@ -138,6 +139,7 @@ namespace Render {
         bool                         commitPendingAndDoExplicitSync(PHLMONITOR pMonitor);                   // TODO? move to protected and fix CMonitorFrameScheduler::onPresented
         SRenderData                  m_renderData;                                                          // TODO? move to protected and fix CRenderPass
         SP<ITexture>                 m_screencopyDeniedTexture;                                             // TODO? make readonly
+        bool                         m_screencopyDebugActive = false;
         uint                         m_failedAssetsNo     = 0;                                              // TODO? make readonly
         bool                         m_reloadScreenShader = true;                                           // at launch it can be set
         CTimer                       m_globalTimer;

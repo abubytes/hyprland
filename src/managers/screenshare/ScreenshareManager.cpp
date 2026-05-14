@@ -6,12 +6,29 @@
 
 using namespace Screenshare;
 
+static bool isSameCommittedOutput(PHLMONITOR sessionMonitor, PHLMONITOR commitMonitor) {
+    if (!sessionMonitor || !commitMonitor)
+        return false;
+
+    if (sessionMonitor == commitMonitor)
+        return true;
+
+    const auto SESSIONPHYSICAL = sessionMonitor->physicalMonitor();
+    const auto COMMITPHYSICAL  = commitMonitor->physicalMonitor();
+
+    return SESSIONPHYSICAL && COMMITPHYSICAL && SESSIONPHYSICAL == COMMITPHYSICAL;
+}
+
 CScreenshareManager::CScreenshareManager() {
     ;
 }
 
 void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
     std::erase_if(m_sessions, [&](const WP<CScreenshareSession>& session) { return session.expired(); });
+
+    if (!m_pendingFrames.empty())
+        LOGM(Log::WARN, "[SSDBG] outputCommit mon={} id={} virt={} physical={} pending={} sessions={}", monitor ? monitor->m_name : "<none>", monitor ? monitor->m_id : -1,
+             monitor ? monitor->isVirtual() : false, monitor && monitor->physicalMonitor() ? monitor->physicalMonitor()->m_name : "<none>", m_pendingFrames.size(), m_sessions.size());
 
     // if no pending frames, and no sessions are sharing, then unblock ds
     if (m_pendingFrames.empty()) {
@@ -25,18 +42,36 @@ void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
     }
 
     std::ranges::for_each(m_pendingFrames, [&](WP<CScreenshareFrame>& frame) {
-        if (frame.expired() || !frame->m_shared || frame->done())
+        if (frame.expired()) {
+            LOGM(Log::WARN, "[SSDBG] outputCommit skip expired frame commitMon={}", monitor ? monitor->m_name : "<none>");
             return;
+        }
 
-        if (frame->m_session->monitor() != monitor)
+        const bool FRAME_DONE = frame->done();
+        if (!frame->m_shared || FRAME_DONE) {
+            LOGM(Log::WARN, "[SSDBG] outputCommit skip frame commitMon={} shared={} done={} copied={} failed={}", monitor ? monitor->m_name : "<none>", frame->m_shared, FRAME_DONE,
+                 frame->m_copied, frame->m_failed);
+            return;
+        }
+
+        const auto SESSIONMONITOR = frame->m_session->monitor();
+        const bool MATCH          = isSameCommittedOutput(SESSIONMONITOR, monitor);
+        LOGM(Log::WARN, "[SSDBG] outputCommit consider commitMon={} sessionMon={} sessionPhys={} match={} type={} damage={} {} {} {}", monitor ? monitor->m_name : "<none>",
+             SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>", SESSIONMONITOR && SESSIONMONITOR->physicalMonitor() ? SESSIONMONITOR->physicalMonitor()->m_name : "<none>", MATCH,
+             sc<int>(frame->m_session->m_type), frame->m_damage.getExtents().x, frame->m_damage.getExtents().y, frame->m_damage.getExtents().w, frame->m_damage.getExtents().h);
+        if (!MATCH)
             return;
 
         if (frame->m_session->m_type == SHARE_WINDOW) {
             CBox geometry = {frame->m_session->m_window->m_realPosition->value(), frame->m_session->m_window->m_realSize->value()};
-            if (geometry.intersection({monitor->m_position, monitor->m_size}).empty())
+            if (geometry.intersection({SESSIONMONITOR->m_position, SESSIONMONITOR->m_size}).empty()) {
+                LOGM(Log::WARN, "[SSDBG] outputCommit skip window outside sessionMon={} geom={} {} {} {}", SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>", geometry.x, geometry.y,
+                     geometry.w, geometry.h);
                 return;
+            }
         }
 
+        LOGM(Log::WARN, "[SSDBG] outputCommit copy frame commitMon={} sessionMon={}", monitor ? monitor->m_name : "<none>", SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>");
         frame->copy();
     });
 
@@ -158,7 +193,7 @@ bool CScreenshareManager::isOutputBeingSSd(PHLMONITOR monitor) {
     return std::ranges::any_of(m_sessions, [monitor](const auto& s) {
         if (!s)
             return false;
-        return s->isActive() && (s->m_type == SHARE_MONITOR || s->m_type == SHARE_REGION) && s->m_monitor == monitor;
+        return s->isActive() && (s->m_type == SHARE_MONITOR || s->m_type == SHARE_REGION) && isSameCommittedOutput(s->monitor(), monitor);
     });
 }
 

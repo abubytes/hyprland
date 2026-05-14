@@ -218,15 +218,24 @@ void IElementRenderer::drawSurface(WP<CSurfacePassElement> element, const CRegio
         g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight = Vector2D(-1, -1);
     }};
 
-    if (!m_data.texture)
+    if (!m_data.texture) {
+        if (g_pHyprRenderer->m_screencopyDebugActive)
+            Log::logger->log(Log::WARN, "[SSDBG] element drawSurface skip no-texture mon={} kind={} name={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
+                             m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"), m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"));
         return;
+    }
 
     const auto& TEXTURE = m_data.texture;
 
     // this is bad, probably has been logged elsewhere. Means the texture failed
     // uploading to the GPU.
-    if (!TEXTURE->ok())
+    if (!TEXTURE->ok()) {
+        if (g_pHyprRenderer->m_screencopyDebugActive)
+            Log::logger->log(Log::WARN, "[SSDBG] element drawSurface skip bad-texture mon={} kind={} name={} texSize={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
+                             m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"), m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"),
+                             TEXTURE->m_size);
         return;
+    }
 
     const auto INTERACTIVERESIZEINPROGRESS = m_data.pWindow && g_layoutManager->dragController()->target() && g_layoutManager->dragController()->mode() == MBIND_RESIZE;
     TRACY_GPU_ZONE("RenderSurface");
@@ -245,6 +254,11 @@ void IElementRenderer::drawSurface(WP<CSurfacePassElement> element, const CRegio
     windowBox.round();
 
     if (windowBox.width <= 1 || windowBox.height <= 1) {
+        if (g_pHyprRenderer->m_screencopyDebugActive)
+            Log::logger->log(Log::WARN, "[SSDBG] element drawSurface skip tiny-box mon={} kind={} name={} box={} {} {} {} scale={} texSize={}",
+                             m_data.pMonitor ? m_data.pMonitor->m_name : "<none>", m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"),
+                             m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"), windowBox.x, windowBox.y, windowBox.w, windowBox.h,
+                             m_data.pMonitor ? m_data.pMonitor->m_scale : 0, TEXTURE->m_size);
         element->discard();
         return;
     }
@@ -259,8 +273,25 @@ void IElementRenderer::drawSurface(WP<CSurfacePassElement> element, const CRegio
 
     auto cancelRender = false;
     auto clipRegion   = element->visibleRegion(cancelRender);
-    if (cancelRender)
+    if (cancelRender) {
+        if (g_pHyprRenderer->m_screencopyDebugActive)
+            Log::logger->log(Log::WARN, "[SSDBG] element drawSurface skip visible-cancel mon={} kind={} name={} box={} {} {} {}",
+                             m_data.pMonitor ? m_data.pMonitor->m_name : "<none>", m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"),
+                             m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"), windowBox.x, windowBox.y, windowBox.w, windowBox.h);
         return;
+    }
+
+    if (g_pHyprRenderer->m_screencopyDebugActive) {
+        auto       DAMAGE         = damage;
+        const auto CLIP_EXTENTS   = clipRegion.getExtents();
+        const auto DAMAGE_EXTENTS = DAMAGE.getExtents();
+        Log::logger->log(Log::WARN,
+                         "[SSDBG] element drawSurface prepared mon={} kind={} name={} box={} {} {} {} clip={} {} {} {} damage={} {} {} {} texSize={} alpha={} overall={} blur={}",
+                         m_data.pMonitor ? m_data.pMonitor->m_name : "<none>", m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"),
+                         m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"), windowBox.x, windowBox.y, windowBox.w, windowBox.h,
+                         CLIP_EXTENTS.x, CLIP_EXTENTS.y, CLIP_EXTENTS.w, CLIP_EXTENTS.h, DAMAGE_EXTENTS.x, DAMAGE_EXTENTS.y, DAMAGE_EXTENTS.w, DAMAGE_EXTENTS.h, TEXTURE->m_size,
+                         ALPHA, OVERALL_ALPHA, BLUR);
+    }
 
     // check for fractional scale surfaces misaligning the buffer size
     // in those cases it's better to just force nearest neighbor

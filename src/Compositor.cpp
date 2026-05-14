@@ -893,7 +893,7 @@ void CCompositor::removeWindowFromVectorSafe(PHLWINDOW pWindow) {
 }
 
 bool CCompositor::monitorExists(PHLMONITOR pMonitor) {
-    return std::ranges::any_of(m_realMonitors, [&](const PHLMONITOR& m) { return m == pMonitor; });
+    return std::ranges::any_of(m_monitors, [&](const PHLMONITOR& m) { return m == pMonitor; }) || std::ranges::any_of(m_realMonitors, [&](const PHLMONITOR& m) { return m == pMonitor; });
 }
 
 PHLWINDOW CCompositor::vectorToWindowUnified(const Vector2D& pos, uint16_t properties, PHLWINDOW pIgnoreWindow) {
