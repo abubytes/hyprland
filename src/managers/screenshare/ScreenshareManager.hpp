@@ -179,6 +179,7 @@ namespace Screenshare {
 
         //
         void copy();
+        void fail();
         bool copyDmabuf();
         bool copyShm();
 
@@ -214,6 +215,7 @@ namespace Screenshare {
         std::vector<WP<CScreenshareSession>> m_sessions;
         std::vector<WP<CCursorshareSession>> m_cursorSessions;
         std::vector<WP<CScreenshareFrame>>   m_pendingFrames;
+        CHyprSignalListener                  m_monitorPreRemovedListener;
 
         struct SManagedSession {
             SManagedSession(UP<CScreenshareSession>&& session);
@@ -224,6 +226,7 @@ namespace Screenshare {
 
         std::vector<UP<SManagedSession>> m_managedSessions;
         WP<CScreenshareSession>          getManagedSession(eScreenshareType type, wl_client* client, PHLMONITOR monitor, PHLWINDOW window, CBox captureBox);
+        void                             stopSessionsForMonitor(PHLMONITOR monitor);
 
         friend class CScreenshareSession;
     };

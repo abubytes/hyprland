@@ -69,6 +69,16 @@ bool CScreenshareFrame::done() const {
     return false;
 }
 
+void CScreenshareFrame::fail() {
+    if (m_failed || m_copied)
+        return;
+
+    m_failed = true;
+
+    if (m_shared && m_callback)
+        m_callback(RESULT_NOT_COPIED);
+}
+
 eScreenshareError CScreenshareFrame::share(SP<IHLBuffer> buffer, const CRegion& clientDamage, FScreenshareCallback callback) {
     if UNLIKELY (done())
         return ERROR_STOPPED;
@@ -209,7 +219,15 @@ void CScreenshareFrame::renderMonitor() {
         LOGM(Log::WARN, "[SSDBG] renderMonitor virtual direct mon={} physical={} renderDataMon={} damage={} {} {} {}", PMONITOR->m_name, SOURCE_MONITOR->m_name,
              g_pHyprRenderer->m_renderData.pMonitor ? g_pHyprRenderer->m_renderData.pMonitor->m_name : "<none>", m_damage.getExtents().x, m_damage.getExtents().y, m_damage.getExtents().w,
              m_damage.getExtents().h);
+
+        g_pHyprRenderer->m_renderData.fbSize = m_bufferSize;
+        g_pHyprRenderer->setProjectionType(Render::RPT_EXPORT);
+        g_pHyprRenderer->setViewport(0, 0, m_bufferSize.x, m_bufferSize.y);
+
+        const auto OLD = g_pHyprRenderer->m_renderData.renderModif.enabled;
+        g_pHyprRenderer->m_renderData.renderModif.enabled = false;
         g_pHyprRenderer->renderLogicalMonitorForScreencopy(PMONITOR, Time::steadyNow());
+        g_pHyprRenderer->m_renderData.renderModif.enabled = OLD;
         return;
     } else {
         auto TEXTURE = SOURCE_MONITOR->resources()->getMirrorTexture();

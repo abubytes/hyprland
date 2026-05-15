@@ -3,6 +3,7 @@
 #include "../../Compositor.hpp"
 #include "../../desktop/view/Window.hpp"
 #include "../../protocols/core/Seat.hpp"
+#include "../../event/EventBus.hpp"
 
 using namespace Screenshare;
 
@@ -20,7 +21,7 @@ static bool isSameCommittedOutput(PHLMONITOR sessionMonitor, PHLMONITOR commitMo
 }
 
 CScreenshareManager::CScreenshareManager() {
-    ;
+    m_monitorPreRemovedListener = Event::bus()->m_events.monitor.preRemoved.listen([this](PHLMONITOR monitor) { stopSessionsForMonitor(monitor); });
 }
 
 void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
@@ -195,6 +196,48 @@ bool CScreenshareManager::isOutputBeingSSd(PHLMONITOR monitor) {
             return false;
         return s->isActive() && (s->m_type == SHARE_MONITOR || s->m_type == SHARE_REGION) && isSameCommittedOutput(s->monitor(), monitor);
     });
+}
+
+void CScreenshareManager::stopSessionsForMonitor(PHLMONITOR monitor) {
+    if (!monitor)
+        return;
+
+    std::erase_if(m_sessions, [](const WP<CScreenshareSession>& session) { return session.expired(); });
+
+    for (auto& frame : m_pendingFrames) {
+        if (frame.expired())
+            continue;
+
+        if (frame->m_session.expired()) {
+            frame->fail();
+            continue;
+        }
+
+        const auto SESSIONMONITOR = frame->m_session->monitor();
+        if (isSameCommittedOutput(SESSIONMONITOR, monitor))
+            frame->fail();
+    }
+
+    for (const auto& session : m_sessions) {
+        if (session.expired())
+            continue;
+
+        const auto SESSIONMONITOR = session->monitor();
+        if (isSameCommittedOutput(SESSIONMONITOR, monitor))
+            session->stop();
+    }
+
+    std::erase_if(m_pendingFrames, [](const WP<CScreenshareFrame>& frame) { return frame.expired() || frame->done(); });
+    std::erase_if(m_sessions, [](const WP<CScreenshareSession>& session) { return session.expired(); });
+
+    if (m_pendingFrames.empty()) {
+        for (const auto& session : m_sessions) {
+            if (!session.expired() && !session->m_stopped && session->m_sharing)
+                return;
+        }
+
+        g_pHyprRenderer->m_directScanoutBlocked = false;
+    }
 }
 
 CScreenshareManager::SManagedSession::SManagedSession(UP<CScreenshareSession>&& session) : m_session(std::move(session)) {
