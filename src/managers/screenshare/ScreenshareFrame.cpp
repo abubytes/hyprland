@@ -195,6 +195,108 @@ void CScreenshareFrame::copy() {
     }
 }
 
+void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
+    if (!pMonitor)
+        return;
+
+    // Draw these after the real scene so monitor/region captures hide sensitive surfaces.
+    auto hidePopups = [&](Vector2D popupBaseOffset) {
+        return [&, popupBaseOffset](WP<Desktop::View::CPopup> popup, void*) {
+            if (!popup->wlSurface() || !popup->wlSurface()->resource() || !popup->visible())
+                return;
+
+            const auto popRel = popup->coordsRelativeToParent();
+            popup->wlSurface()->resource()->breadthfirst(
+                [&](SP<CWLSurfaceResource> surf, const Vector2D& localOff, void*) {
+                    const auto size = surf->m_current.size;
+                    const auto surfBox =
+                        CBox{popupBaseOffset + popRel + localOff, size}.translate(pMonitor->m_position).scale(pMonitor->m_scale).translate(-m_session->m_captureBox.pos());
+
+                    if LIKELY (surfBox.w > 0 && surfBox.h > 0)
+                        g_pHyprRenderer->draw(CRectPassElement::SRectData{.box = surfBox, .color = Colors::BLACK}, surfBox);
+                },
+                nullptr);
+        };
+    };
+
+    for (auto const& l : g_pCompositor->m_layers) {
+        if (!l->m_ruleApplicator->noScreenShare().valueOrDefault())
+            continue;
+
+        if UNLIKELY (!l->visible())
+            continue;
+
+        const auto REALPOS  = l->m_realPosition->value();
+        const auto REALSIZE = l->m_realSize->value();
+
+        const auto noScreenShareBox = CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)}
+                                          .translate(-pMonitor->m_position)
+                                          .scale(pMonitor->m_scale)
+                                          .translate(-m_session->m_captureBox.pos());
+
+        g_pHyprRenderer->draw(CRectPassElement::SRectData{.box = noScreenShareBox, .color = Colors::BLACK}, noScreenShareBox);
+
+        const auto     geom            = l->m_geometry;
+        const Vector2D popupBaseOffset = REALPOS - Vector2D{geom.pos().x, geom.pos().y};
+        if (l->m_popupHead)
+            l->m_popupHead->breadthfirst(hidePopups(popupBaseOffset), nullptr);
+    }
+
+    for (auto const& w : g_pCompositor->m_windows) {
+        if (!w->m_ruleApplicator->noScreenShare().valueOrDefault())
+            continue;
+
+        if (!g_pHyprRenderer->shouldRenderWindow(w, pMonitor))
+            continue;
+
+        if (w->isHidden())
+            continue;
+
+        const auto PWORKSPACE = w->m_workspace;
+
+        if UNLIKELY (!PWORKSPACE && !w->m_fadingOut && w->alphaValue(WINDOW_ALPHA_FADE) * w->alphaValue(WINDOW_ALPHA_FULLSCREEN) != 0.f)
+            continue;
+
+        const auto renderOffset     = PWORKSPACE && !w->m_pinned ? PWORKSPACE->m_renderOffset->value() : Vector2D{};
+        const auto REALPOS          = w->m_realPosition->value() + renderOffset;
+        const auto noScreenShareBox = CBox{REALPOS.x, REALPOS.y, std::max(w->m_realSize->value().x, 5.0), std::max(w->m_realSize->value().y, 5.0)}
+                                          .translate(-pMonitor->m_position)
+                                          .scale(pMonitor->m_scale)
+                                          .translate(-m_session->m_captureBox.pos());
+
+        // Rounding can leak pixels when a region capture shifts the mask relative to the output.
+        const auto dontRound     = m_session->m_captureBox.pos() != Vector2D() || w->isEffectiveInternalFSMode(FSMODE_FULLSCREEN);
+        const auto rounding      = dontRound ? 0 : w->rounding() * pMonitor->m_scale;
+        const auto roundingPower = dontRound ? 2.0f : w->roundingPower();
+
+        g_pHyprRenderer->draw(
+            CRectPassElement::SRectData{
+                .box           = noScreenShareBox,
+                .color         = Colors::BLACK,
+                .round         = rounding,
+                .roundingPower = roundingPower,
+            },
+            noScreenShareBox);
+
+        if (w->m_isX11 || !w->m_popupHead)
+            continue;
+
+        const auto     geom            = w->m_xdgSurface->m_current.geometry;
+        const Vector2D popupBaseOffset = REALPOS - Vector2D{geom.pos().x, geom.pos().y};
+
+        w->m_popupHead->breadthfirst(hidePopups(popupBaseOffset), nullptr);
+    }
+}
+
+void CScreenshareFrame::renderOverlayCursor(PHLMONITOR pMonitor) {
+    if (!m_overlayCursor || !pMonitor)
+        return;
+
+    CRegion  fakeDamage = {0, 0, INT16_MAX, INT16_MAX};
+    Vector2D cursorPos  = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position - m_session->m_captureBox.pos() / pMonitor->m_scale;
+    g_pPointerManager->renderSoftwareCursorsFor(pMonitor, Time::steadyNow(), fakeDamage, cursorPos, true);
+}
+
 void CScreenshareFrame::renderMonitor() {
     if ((m_session->m_type != SHARE_MONITOR && m_session->m_type != SHARE_REGION) || done())
         return;
@@ -228,6 +330,8 @@ void CScreenshareFrame::renderMonitor() {
         g_pHyprRenderer->m_renderData.renderModif.enabled = false;
         g_pHyprRenderer->renderLogicalMonitorForScreencopy(PMONITOR, Time::steadyNow());
         g_pHyprRenderer->m_renderData.renderModif.enabled = OLD;
+        renderNoScreenShareOverlays(PMONITOR);
+        renderOverlayCursor(PMONITOR);
         return;
     } else {
         auto TEXTURE = SOURCE_MONITOR->resources()->getMirrorTexture();
@@ -270,99 +374,8 @@ void CScreenshareFrame::renderMonitor() {
         g_pHyprRenderer->m_renderData.renderModif.enabled = OLD;
     }
 
-    // render black boxes for noscreenshare
-    auto hidePopups = [&](Vector2D popupBaseOffset) {
-        return [&, popupBaseOffset](WP<Desktop::View::CPopup> popup, void*) {
-            if (!popup->wlSurface() || !popup->wlSurface()->resource() || !popup->visible())
-                return;
-
-            const auto popRel = popup->coordsRelativeToParent();
-            popup->wlSurface()->resource()->breadthfirst(
-                [&](SP<CWLSurfaceResource> surf, const Vector2D& localOff, void*) {
-                    const auto size = surf->m_current.size;
-                    const auto surfBox =
-                        CBox{popupBaseOffset + popRel + localOff, size}.translate(PMONITOR->m_position).scale(PMONITOR->m_scale).translate(-m_session->m_captureBox.pos());
-
-                    if LIKELY (surfBox.w > 0 && surfBox.h > 0)
-                        g_pHyprRenderer->draw(CRectPassElement::SRectData{.box = surfBox, .color = Colors::BLACK}, surfBox);
-                },
-                nullptr);
-        };
-    };
-
-    for (auto const& l : g_pCompositor->m_layers) {
-        if (!l->m_ruleApplicator->noScreenShare().valueOrDefault())
-            continue;
-
-        if UNLIKELY (!l->visible())
-            continue;
-
-        const auto REALPOS  = l->m_realPosition->value();
-        const auto REALSIZE = l->m_realSize->value();
-
-        const auto noScreenShareBox = CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)}
-                                          .translate(-PMONITOR->m_position)
-                                          .scale(PMONITOR->m_scale)
-                                          .translate(-m_session->m_captureBox.pos());
-
-        g_pHyprRenderer->draw(CRectPassElement::SRectData{.box = noScreenShareBox, .color = Colors::BLACK}, noScreenShareBox);
-
-        const auto     geom            = l->m_geometry;
-        const Vector2D popupBaseOffset = REALPOS - Vector2D{geom.pos().x, geom.pos().y};
-        if (l->m_popupHead)
-            l->m_popupHead->breadthfirst(hidePopups(popupBaseOffset), nullptr);
-    }
-
-    for (auto const& w : g_pCompositor->m_windows) {
-        if (!w->m_ruleApplicator->noScreenShare().valueOrDefault())
-            continue;
-
-        if (!g_pHyprRenderer->shouldRenderWindow(w, PMONITOR))
-            continue;
-
-        if (w->isHidden())
-            continue;
-
-        const auto PWORKSPACE = w->m_workspace;
-
-        if UNLIKELY (!PWORKSPACE && !w->m_fadingOut && w->alphaValue(WINDOW_ALPHA_FADE) * w->alphaValue(WINDOW_ALPHA_FULLSCREEN) != 0.f)
-            continue;
-
-        const auto renderOffset     = PWORKSPACE && !w->m_pinned ? PWORKSPACE->m_renderOffset->value() : Vector2D{};
-        const auto REALPOS          = w->m_realPosition->value() + renderOffset;
-        const auto noScreenShareBox = CBox{REALPOS.x, REALPOS.y, std::max(w->m_realSize->value().x, 5.0), std::max(w->m_realSize->value().y, 5.0)}
-                                          .translate(-PMONITOR->m_position)
-                                          .scale(PMONITOR->m_scale)
-                                          .translate(-m_session->m_captureBox.pos());
-
-        // seems like rounding doesn't play well with how we manipulate the box position to render regions causing the window to leak through
-        const auto dontRound     = m_session->m_captureBox.pos() != Vector2D() || w->isEffectiveInternalFSMode(FSMODE_FULLSCREEN);
-        const auto rounding      = dontRound ? 0 : w->rounding() * PMONITOR->m_scale;
-        const auto roundingPower = dontRound ? 2.0f : w->roundingPower();
-
-        g_pHyprRenderer->draw(
-            CRectPassElement::SRectData{
-                .box           = noScreenShareBox,
-                .color         = Colors::BLACK,
-                .round         = rounding,
-                .roundingPower = roundingPower,
-            },
-            noScreenShareBox);
-
-        if (w->m_isX11 || !w->m_popupHead)
-            continue;
-
-        const auto     geom            = w->m_xdgSurface->m_current.geometry;
-        const Vector2D popupBaseOffset = REALPOS - Vector2D{geom.pos().x, geom.pos().y};
-
-        w->m_popupHead->breadthfirst(hidePopups(popupBaseOffset), nullptr);
-    }
-
-    if (m_overlayCursor) {
-        CRegion  fakeDamage = {0, 0, INT16_MAX, INT16_MAX};
-        Vector2D cursorPos  = g_pInputManager->getMouseCoordsInternal() - PMONITOR->m_position - m_session->m_captureBox.pos() / PMONITOR->m_scale;
-        g_pPointerManager->renderSoftwareCursorsFor(PMONITOR, Time::steadyNow(), fakeDamage, cursorPos, true);
-    }
+    renderNoScreenShareOverlays(PMONITOR);
+    renderOverlayCursor(PMONITOR);
 }
 
 void CScreenshareFrame::renderWindow() {
