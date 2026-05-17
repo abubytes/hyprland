@@ -1110,7 +1110,7 @@ bool CMonitor::applyMonitorRule(Config::CMonitorRule&& pMonitorRule, bool force)
 void CMonitor::addDamage(const pixman_region32_t* rg) {
     if (m_isVirtual) {
         const auto PARENT = physicalMonitor();
-        if (!PARENT)
+        if (!PARENT || PARENT.get() == this)
             return;
 
         CRegion damage{rg};
@@ -1133,7 +1133,7 @@ void CMonitor::addDamage(const CRegion& rg) {
 void CMonitor::addDamage(const CBox& box) {
     if (m_isVirtual) {
         const auto PARENT = physicalMonitor();
-        if (!PARENT)
+        if (!PARENT || PARENT.get() == this)
             return;
 
         PARENT->addDamage(box.copy().translate(((m_position - PARENT->m_position) * PARENT->m_scale).round()));
@@ -1179,7 +1179,7 @@ bool CMonitor::isVirtual() const {
 }
 
 PHLMONITOR CMonitor::physicalMonitor() const {
-    if (m_isVirtual && m_parentMonitor)
+    if (m_isVirtual)
         return m_parentMonitor.lock();
 
     return m_self.lock();

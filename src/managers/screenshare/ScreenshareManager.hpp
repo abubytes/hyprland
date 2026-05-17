@@ -185,6 +185,7 @@ namespace Screenshare {
 
         void render();
         void renderMonitor();
+        bool hasNoScreenShareOverlays(PHLMONITOR pMonitor);
         void renderNoScreenShareOverlays(PHLMONITOR pMonitor);
         void renderOverlayCursor(PHLMONITOR pMonitor);
         void renderMonitorRegion();

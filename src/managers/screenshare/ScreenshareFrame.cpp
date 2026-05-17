@@ -20,11 +20,49 @@ using namespace Hyprgraphics::Egl;
 using namespace Screenshare;
 using namespace Desktop::View;
 
+static CBox noScreenShareBoxForMonitor(PHLMONITOR pMonitor, const CBox& captureBox, const CBox& logicalBox) {
+    return logicalBox.copy().translate(-pMonitor->m_position).scale(pMonitor->m_scale).translate(-captureBox.pos());
+}
+
+static bool boxTouchesBuffer(const CBox& box, const Vector2D& bufferSize) {
+    return !box.intersection(CBox{{}, bufferSize}).empty();
+}
+
+static bool shouldMaskNoScreenShareWindow(PHLWINDOW pWindow, PHLMONITOR pMonitor) {
+    if (!pWindow->m_ruleApplicator->noScreenShare().valueOrDefault())
+        return false;
+
+    if (!pWindow->visibleOnMonitor(pMonitor))
+        return false;
+
+    if (pWindow->isHidden())
+        return false;
+
+    if (g_pHyprRenderer->shouldRenderWindow(pWindow, pMonitor))
+        return true;
+
+    const auto PWINDOWMONITOR = pWindow->m_monitor.lock();
+    if (!PWINDOWMONITOR || PWINDOWMONITOR == pMonitor || PWINDOWMONITOR->physicalMonitor() != pMonitor)
+        return false;
+
+    const auto PWORKSPACE = pWindow->m_workspace;
+    if (!PWORKSPACE && !pWindow->m_fadingOut)
+        return false;
+
+    if (pWindow->m_pinned)
+        return true;
+
+    // Physical monitor captures use the parent output texture. Tiled windows that belong
+    // to a virtual child monitor are visible in that texture, but shouldRenderWindow()
+    // rejects them for the physical parent because their workspace monitor differs.
+    return PWORKSPACE && PWORKSPACE->isVisible();
+}
+
 CScreenshareFrame::CScreenshareFrame(WP<CScreenshareSession> session, bool overlayCursor, bool isFirst) :
     m_session(session), m_bufferSize(m_session->bufferSize()), m_overlayCursor(overlayCursor), m_isFirst(isFirst) {
     const auto PMONITOR = m_session->monitor();
-    LOGM(Log::WARN, "[SSDBG] frame ctor type={} mon={} id={} virt={} physical={} pos={} size={} pix={} capture={} {} {} {} buffer={} overlay={} first={}", sc<int>(m_session->m_type),
-         PMONITOR ? PMONITOR->m_name : "<none>", PMONITOR ? PMONITOR->m_id : -1, PMONITOR ? PMONITOR->isVirtual() : false,
+    LOGM(Log::WARN, "[SSDBG] frame ctor type={} mon={} id={} virt={} physical={} pos={} size={} pix={} capture={} {} {} {} buffer={} overlay={} first={}",
+         sc<int>(m_session->m_type), PMONITOR ? PMONITOR->m_name : "<none>", PMONITOR ? PMONITOR->m_id : -1, PMONITOR ? PMONITOR->isVirtual() : false,
          PMONITOR && PMONITOR->physicalMonitor() ? PMONITOR->physicalMonitor()->m_name : "<none>", PMONITOR ? PMONITOR->m_position : Vector2D{},
          PMONITOR ? PMONITOR->m_size : Vector2D{}, PMONITOR ? PMONITOR->m_pixelSize : Vector2D{}, m_session->m_captureBox.x, m_session->m_captureBox.y, m_session->m_captureBox.w,
          m_session->m_captureBox.h, m_bufferSize, m_overlayCursor, m_isFirst);
@@ -122,9 +160,9 @@ eScreenshareError CScreenshareFrame::share(SP<IHLBuffer> buffer, const CRegion& 
 
     auto       CLIENT_DAMAGE         = clientDamage;
     const auto CLIENT_DAMAGE_EXTENTS = CLIENT_DAMAGE.getExtents();
-    LOGM(Log::WARN, "[SSDBG] frame share accepted type={} mon={} bufSize={} bufferFormat={} allowedFormats={} clientDamage={} {} {} {} first={} overlay={}", sc<int>(m_session->m_type),
-         m_session->monitor() ? m_session->monitor()->m_name : "<none>", m_bufferSize, bufFormat, m_session->allowedFormats().size(), CLIENT_DAMAGE_EXTENTS.x, CLIENT_DAMAGE_EXTENTS.y,
-         CLIENT_DAMAGE_EXTENTS.w, CLIENT_DAMAGE_EXTENTS.h, m_isFirst, m_overlayCursor);
+    LOGM(Log::WARN, "[SSDBG] frame share accepted type={} mon={} bufSize={} bufferFormat={} allowedFormats={} clientDamage={} {} {} {} first={} overlay={}",
+         sc<int>(m_session->m_type), m_session->monitor() ? m_session->monitor()->m_name : "<none>", m_bufferSize, bufFormat, m_session->allowedFormats().size(),
+         CLIENT_DAMAGE_EXTENTS.x, CLIENT_DAMAGE_EXTENTS.y, CLIENT_DAMAGE_EXTENTS.w, CLIENT_DAMAGE_EXTENTS.h, m_isFirst, m_overlayCursor);
 
     m_buffer   = buffer;
     m_callback = callback;
@@ -147,6 +185,12 @@ eScreenshareError CScreenshareFrame::share(SP<IHLBuffer> buffer, const CRegion& 
 
     m_damage.intersect(0, 0, m_bufferSize.x, m_bufferSize.y);
 
+    if ((m_session->m_type == SHARE_MONITOR || m_session->m_type == SHARE_REGION) && hasNoScreenShareOverlays(m_session->monitor())) {
+        // Privacy masks must be included in the copied damage. Without this, an incremental
+        // screencast frame can render the black cover locally but never copy it to PipeWire.
+        m_damage = CRegion(0, 0, m_bufferSize.x, m_bufferSize.y);
+    }
+
     const auto DAMAGE_EXTENTS = m_damage.getExtents();
     LOGM(Log::WARN, "[SSDBG] frame share damage type={} mon={} damage={} {} {} {}", sc<int>(m_session->m_type), m_session->monitor() ? m_session->monitor()->m_name : "<none>",
          DAMAGE_EXTENTS.x, DAMAGE_EXTENTS.y, DAMAGE_EXTENTS.w, DAMAGE_EXTENTS.h);
@@ -167,9 +211,9 @@ void CScreenshareFrame::copy() {
 
     // store a snapshot before the permission popup so we don't break screenshots
     const auto PERM = g_pDynamicPermissionManager->clientPermissionMode(m_session->m_client, PERMISSION_TYPE_SCREENCOPY);
-    LOGM(Log::WARN, "[SSDBG] frame copy start type={} mon={} perm={} shm={} dmabuf={} damage={} {} {} {}", sc<int>(m_session->m_type), m_session->monitor() ? m_session->monitor()->m_name : "<none>",
-         sc<int>(PERM), m_buffer && m_buffer->shm().success, m_buffer && m_buffer->dmabuf().success, m_damage.getExtents().x, m_damage.getExtents().y, m_damage.getExtents().w,
-         m_damage.getExtents().h);
+    LOGM(Log::WARN, "[SSDBG] frame copy start type={} mon={} perm={} shm={} dmabuf={} damage={} {} {} {}", sc<int>(m_session->m_type),
+         m_session->monitor() ? m_session->monitor()->m_name : "<none>", sc<int>(PERM), m_buffer && m_buffer->shm().success, m_buffer && m_buffer->dmabuf().success,
+         m_damage.getExtents().x, m_damage.getExtents().y, m_damage.getExtents().w, m_damage.getExtents().h);
     if (PERM == PERMISSION_RULE_ALLOW_MODE_PENDING) {
         if (!m_session->m_tempFB || !m_session->m_tempFB->isAllocated())
             storeTempFB();
@@ -188,16 +232,59 @@ void CScreenshareFrame::copy() {
         // screensharing has started again
         m_session->screenshareEvents(true);
         m_session->m_shareStopTimer->updateTimeout(std::chrono::milliseconds(500)); // check in half second
-        LOGM(Log::WARN, "[SSDBG] frame copy success type={} mon={} copied={}", sc<int>(m_session->m_type), m_session->monitor() ? m_session->monitor()->m_name : "<none>", m_copied);
+        LOGM(Log::WARN, "[SSDBG] frame copy success type={} mon={} copied={}", sc<int>(m_session->m_type), m_session->monitor() ? m_session->monitor()->m_name : "<none>",
+             m_copied);
     } else {
         LOGM(Log::WARN, "[SSDBG] frame copy failed type={} mon={}", sc<int>(m_session->m_type), m_session->monitor() ? m_session->monitor()->m_name : "<none>");
         m_callback(RESULT_NOT_COPIED);
     }
 }
 
+bool CScreenshareFrame::hasNoScreenShareOverlays(PHLMONITOR pMonitor) {
+    if (!pMonitor)
+        return false;
+
+    for (auto const& l : g_pCompositor->m_layers) {
+        if (!l->m_ruleApplicator->noScreenShare().valueOrDefault())
+            continue;
+
+        if UNLIKELY (!l->visible())
+            continue;
+
+        const auto REALPOS  = l->m_realPosition->value();
+        const auto REALSIZE = l->m_realSize->value();
+        const auto BOX      = noScreenShareBoxForMonitor(pMonitor, m_session->m_captureBox, CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)});
+
+        if (boxTouchesBuffer(BOX, m_bufferSize))
+            return true;
+    }
+
+    for (auto const& w : g_pCompositor->m_windows) {
+        if (!shouldMaskNoScreenShareWindow(w, pMonitor))
+            continue;
+
+        const auto PWORKSPACE = w->m_workspace;
+
+        if UNLIKELY (!PWORKSPACE && !w->m_fadingOut && w->alphaValue(WINDOW_ALPHA_FADE) * w->alphaValue(WINDOW_ALPHA_FULLSCREEN) != 0.f)
+            continue;
+
+        const auto renderOffset = PWORKSPACE && !w->m_pinned ? PWORKSPACE->m_renderOffset->value() : Vector2D{};
+        const auto REALPOS      = w->m_realPosition->value() + renderOffset;
+        const auto BOX          = noScreenShareBoxForMonitor(pMonitor, m_session->m_captureBox,
+                                                             CBox{REALPOS.x, REALPOS.y, std::max(w->m_realSize->value().x, 5.0), std::max(w->m_realSize->value().y, 5.0)});
+
+        if (boxTouchesBuffer(BOX, m_bufferSize))
+            return true;
+    }
+
+    return false;
+}
+
 void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
     if (!pMonitor)
         return;
+
+    const CRegion fullFrameDamage = CRegion(0, 0, m_bufferSize.x, m_bufferSize.y);
 
     // Draw these after the real scene so monitor/region captures hide sensitive surfaces.
     auto hidePopups = [&](Vector2D popupBaseOffset) {
@@ -208,12 +295,11 @@ void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
             const auto popRel = popup->coordsRelativeToParent();
             popup->wlSurface()->resource()->breadthfirst(
                 [&](SP<CWLSurfaceResource> surf, const Vector2D& localOff, void*) {
-                    const auto size = surf->m_current.size;
-                    const auto surfBox =
-                        CBox{popupBaseOffset + popRel + localOff, size}.translate(pMonitor->m_position).scale(pMonitor->m_scale).translate(-m_session->m_captureBox.pos());
+                    const auto size    = surf->m_current.size;
+                    const auto surfBox = noScreenShareBoxForMonitor(pMonitor, m_session->m_captureBox, CBox{popupBaseOffset + popRel + localOff, size});
 
                     if LIKELY (surfBox.w > 0 && surfBox.h > 0)
-                        g_pHyprRenderer->draw(CRectPassElement::SRectData{.box = surfBox, .color = Colors::BLACK}, surfBox);
+                        g_pHyprRenderer->draw(CRectPassElement::SRectData{.box = surfBox, .color = Colors::BLACK}, fullFrameDamage);
                 },
                 nullptr);
         };
@@ -229,12 +315,10 @@ void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
         const auto REALPOS  = l->m_realPosition->value();
         const auto REALSIZE = l->m_realSize->value();
 
-        const auto noScreenShareBox = CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)}
-                                          .translate(-pMonitor->m_position)
-                                          .scale(pMonitor->m_scale)
-                                          .translate(-m_session->m_captureBox.pos());
+        const auto noScreenShareBox =
+            noScreenShareBoxForMonitor(pMonitor, m_session->m_captureBox, CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)});
 
-        g_pHyprRenderer->draw(CRectPassElement::SRectData{.box = noScreenShareBox, .color = Colors::BLACK}, noScreenShareBox);
+        g_pHyprRenderer->draw(CRectPassElement::SRectData{.box = noScreenShareBox, .color = Colors::BLACK}, fullFrameDamage);
 
         const auto     geom            = l->m_geometry;
         const Vector2D popupBaseOffset = REALPOS - Vector2D{geom.pos().x, geom.pos().y};
@@ -243,13 +327,7 @@ void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
     }
 
     for (auto const& w : g_pCompositor->m_windows) {
-        if (!w->m_ruleApplicator->noScreenShare().valueOrDefault())
-            continue;
-
-        if (!g_pHyprRenderer->shouldRenderWindow(w, pMonitor))
-            continue;
-
-        if (w->isHidden())
+        if (!shouldMaskNoScreenShareWindow(w, pMonitor))
             continue;
 
         const auto PWORKSPACE = w->m_workspace;
@@ -259,10 +337,8 @@ void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
 
         const auto renderOffset     = PWORKSPACE && !w->m_pinned ? PWORKSPACE->m_renderOffset->value() : Vector2D{};
         const auto REALPOS          = w->m_realPosition->value() + renderOffset;
-        const auto noScreenShareBox = CBox{REALPOS.x, REALPOS.y, std::max(w->m_realSize->value().x, 5.0), std::max(w->m_realSize->value().y, 5.0)}
-                                          .translate(-pMonitor->m_position)
-                                          .scale(pMonitor->m_scale)
-                                          .translate(-m_session->m_captureBox.pos());
+        const auto noScreenShareBox = noScreenShareBoxForMonitor(pMonitor, m_session->m_captureBox,
+                                                                 CBox{REALPOS.x, REALPOS.y, std::max(w->m_realSize->value().x, 5.0), std::max(w->m_realSize->value().y, 5.0)});
 
         // Rounding can leak pixels when a region capture shifts the mask relative to the output.
         const auto dontRound     = m_session->m_captureBox.pos() != Vector2D() || w->isEffectiveInternalFSMode(FSMODE_FULLSCREEN);
@@ -276,7 +352,7 @@ void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
                 .round         = rounding,
                 .roundingPower = roundingPower,
             },
-            noScreenShareBox);
+            fullFrameDamage);
 
         if (w->m_isX11 || !w->m_popupHead)
             continue;
@@ -303,10 +379,10 @@ void CScreenshareFrame::renderMonitor() {
 
     const auto PMONITOR       = m_session->monitor();
     const auto SOURCE_MONITOR = PMONITOR->physicalMonitor();
-    LOGM(Log::WARN, "[SSDBG] renderMonitor start type={} mon={} id={} virt={} physical={} pos={} size={} pix={} capture={} {} {} {} renderMon={} fbSize={}", sc<int>(m_session->m_type),
-         PMONITOR ? PMONITOR->m_name : "<none>", PMONITOR ? PMONITOR->m_id : -1, PMONITOR ? PMONITOR->isVirtual() : false, SOURCE_MONITOR ? SOURCE_MONITOR->m_name : "<none>",
-         PMONITOR ? PMONITOR->m_position : Vector2D{}, PMONITOR ? PMONITOR->m_size : Vector2D{}, PMONITOR ? PMONITOR->m_pixelSize : Vector2D{}, m_session->m_captureBox.x,
-         m_session->m_captureBox.y, m_session->m_captureBox.w, m_session->m_captureBox.h,
+    LOGM(Log::WARN, "[SSDBG] renderMonitor start type={} mon={} id={} virt={} physical={} pos={} size={} pix={} capture={} {} {} {} renderMon={} fbSize={}",
+         sc<int>(m_session->m_type), PMONITOR ? PMONITOR->m_name : "<none>", PMONITOR ? PMONITOR->m_id : -1, PMONITOR ? PMONITOR->isVirtual() : false,
+         SOURCE_MONITOR ? SOURCE_MONITOR->m_name : "<none>", PMONITOR ? PMONITOR->m_position : Vector2D{}, PMONITOR ? PMONITOR->m_size : Vector2D{},
+         PMONITOR ? PMONITOR->m_pixelSize : Vector2D{}, m_session->m_captureBox.x, m_session->m_captureBox.y, m_session->m_captureBox.w, m_session->m_captureBox.h,
          g_pHyprRenderer->m_renderData.pMonitor ? g_pHyprRenderer->m_renderData.pMonitor->m_name : "<none>", g_pHyprRenderer->m_renderData.fbSize);
     if (!SOURCE_MONITOR) {
         LOGM(Log::ERR, "Invalid source monitor");
@@ -319,14 +395,14 @@ void CScreenshareFrame::renderMonitor() {
 
     if (PMONITOR->isVirtual()) {
         LOGM(Log::WARN, "[SSDBG] renderMonitor virtual direct mon={} physical={} renderDataMon={} damage={} {} {} {}", PMONITOR->m_name, SOURCE_MONITOR->m_name,
-             g_pHyprRenderer->m_renderData.pMonitor ? g_pHyprRenderer->m_renderData.pMonitor->m_name : "<none>", m_damage.getExtents().x, m_damage.getExtents().y, m_damage.getExtents().w,
-             m_damage.getExtents().h);
+             g_pHyprRenderer->m_renderData.pMonitor ? g_pHyprRenderer->m_renderData.pMonitor->m_name : "<none>", m_damage.getExtents().x, m_damage.getExtents().y,
+             m_damage.getExtents().w, m_damage.getExtents().h);
 
         g_pHyprRenderer->m_renderData.fbSize = m_bufferSize;
         g_pHyprRenderer->setProjectionType(Render::RPT_EXPORT);
         g_pHyprRenderer->setViewport(0, 0, m_bufferSize.x, m_bufferSize.y);
 
-        const auto OLD = g_pHyprRenderer->m_renderData.renderModif.enabled;
+        const auto OLD                                    = g_pHyprRenderer->m_renderData.renderModif.enabled;
         g_pHyprRenderer->m_renderData.renderModif.enabled = false;
         g_pHyprRenderer->renderLogicalMonitorForScreencopy(PMONITOR, Time::steadyNow());
         g_pHyprRenderer->m_renderData.renderModif.enabled = OLD;
@@ -351,10 +427,10 @@ void CScreenshareFrame::renderMonitor() {
                              g_pHyprRenderer->m_renderData.currentFB->imageDescription()->value());
 
         // render monitor texture
-        CBox       monbox = CBox{{}, SOURCE_MONITOR->m_pixelSize}
-                                .transform(Math::wlTransformToHyprutils(Math::invertTransform(SOURCE_MONITOR->m_transform)), SOURCE_MONITOR->m_pixelSize.x,
-                                           SOURCE_MONITOR->m_pixelSize.y)
-                                .translate(-m_session->m_captureBox.pos()); // vvvv kinda ass-backwards but that's how I designed the renderer... sigh.
+        CBox monbox = CBox{{}, SOURCE_MONITOR->m_pixelSize}
+                          .transform(Math::wlTransformToHyprutils(Math::invertTransform(SOURCE_MONITOR->m_transform)), SOURCE_MONITOR->m_pixelSize.x,
+                                     SOURCE_MONITOR->m_pixelSize.y)
+                          .translate(-m_session->m_captureBox.pos()); // vvvv kinda ass-backwards but that's how I designed the renderer... sigh.
 
         LOGM(Log::WARN, "[SSDBG] renderMonitor physical mirror source={} sessionMon={} mirrorBox={} {} {} {} textureSize={}", SOURCE_MONITOR->m_name, PMONITOR->m_name, monbox.x,
              monbox.y, monbox.w, monbox.h, TEXTURE ? TEXTURE->m_size : Vector2D{});
@@ -423,11 +499,11 @@ void CScreenshareFrame::renderWindow() {
 void CScreenshareFrame::render() {
     const auto PERM = g_pDynamicPermissionManager->clientPermissionMode(m_session->m_client, PERMISSION_TYPE_SCREENCOPY);
 
-    CRegion    frameRegion = {0, 0, g_pHyprRenderer->m_renderData.pMonitor->m_pixelSize.x, g_pHyprRenderer->m_renderData.pMonitor->m_pixelSize.y};
-    const auto FRAME_EXTENTS = frameRegion.getExtents();
+    CRegion    frameRegion    = {0, 0, g_pHyprRenderer->m_renderData.pMonitor->m_pixelSize.x, g_pHyprRenderer->m_renderData.pMonitor->m_pixelSize.y};
+    const auto FRAME_EXTENTS  = frameRegion.getExtents();
     const auto DAMAGE_EXTENTS = m_damage.getExtents();
-    LOGM(Log::WARN, "[SSDBG] render enter type={} mon={} perm={} buffer={} renderMon={} renderPix={} fbSize={} frameRegion={} {} {} {} damage={} {} {} {}", sc<int>(m_session->m_type),
-         m_session->monitor() ? m_session->monitor()->m_name : "<none>", sc<int>(PERM), m_bufferSize,
+    LOGM(Log::WARN, "[SSDBG] render enter type={} mon={} perm={} buffer={} renderMon={} renderPix={} fbSize={} frameRegion={} {} {} {} damage={} {} {} {}",
+         sc<int>(m_session->m_type), m_session->monitor() ? m_session->monitor()->m_name : "<none>", sc<int>(PERM), m_bufferSize,
          g_pHyprRenderer->m_renderData.pMonitor ? g_pHyprRenderer->m_renderData.pMonitor->m_name : "<none>",
          g_pHyprRenderer->m_renderData.pMonitor ? g_pHyprRenderer->m_renderData.pMonitor->m_pixelSize : Vector2D{}, g_pHyprRenderer->m_renderData.fbSize, FRAME_EXTENTS.x,
          FRAME_EXTENTS.y, FRAME_EXTENTS.w, FRAME_EXTENTS.h, DAMAGE_EXTENTS.x, DAMAGE_EXTENTS.y, DAMAGE_EXTENTS.w, DAMAGE_EXTENTS.h);
@@ -442,8 +518,8 @@ void CScreenshareFrame::render() {
     bool windowShareDenied = m_session->m_type == SHARE_WINDOW && m_session->m_window->m_ruleApplicator && m_session->m_window->m_ruleApplicator->noScreenShare().valueOrDefault();
     g_pHyprRenderer->startRenderPass();
     if (PERM == PERMISSION_RULE_ALLOW_MODE_DENY || windowShareDenied) {
-        LOGM(Log::WARN, "[SSDBG] render denied texture type={} mon={} perm={} windowDenied={}", sc<int>(m_session->m_type), m_session->monitor() ? m_session->monitor()->m_name : "<none>",
-             sc<int>(PERM), windowShareDenied);
+        LOGM(Log::WARN, "[SSDBG] render denied texture type={} mon={} perm={} windowDenied={}", sc<int>(m_session->m_type),
+             m_session->monitor() ? m_session->monitor()->m_name : "<none>", sc<int>(PERM), windowShareDenied);
         CBox texbox = CBox{m_bufferSize / 2.F, g_pHyprRenderer->m_screencopyDeniedTexture->m_size}.translate(-g_pHyprRenderer->m_screencopyDeniedTexture->m_size / 2.F);
         g_pHyprRenderer->draw(CTexPassElement::SRenderData{.tex = g_pHyprRenderer->m_screencopyDeniedTexture, .box = texbox}, texbox);
         return;
@@ -481,7 +557,7 @@ bool CScreenshareFrame::copyDmabuf() {
          g_pHyprRenderer->m_renderData.fbSize);
     g_pHyprRenderer->m_renderData.currentFB->setImageDescription(NColorManagement::DEFAULT_SRGB_IMAGE_DESCRIPTION);
 
-    const auto OLDDEBUG = g_pHyprRenderer->m_screencopyDebugActive;
+    const auto OLDDEBUG                      = g_pHyprRenderer->m_screencopyDebugActive;
     g_pHyprRenderer->m_screencopyDebugActive = true;
     render();
 
@@ -515,10 +591,10 @@ bool CScreenshareFrame::copyShm() {
 
     const auto PMONITOR = m_session->monitor();
 
-    LOGM(Log::WARN, "[SSDBG] copyShm begin mon={} buffer={} format={} damage={} {} {} {}", PMONITOR ? PMONITOR->m_name : "<none>", m_bufferSize, shm.format, m_damage.getExtents().x,
-         m_damage.getExtents().y, m_damage.getExtents().w, m_damage.getExtents().h);
+    LOGM(Log::WARN, "[SSDBG] copyShm begin mon={} buffer={} format={} damage={} {} {} {}", PMONITOR ? PMONITOR->m_name : "<none>", m_bufferSize, shm.format,
+         m_damage.getExtents().x, m_damage.getExtents().y, m_damage.getExtents().w, m_damage.getExtents().h);
 
-    auto       outFB = g_pHyprRenderer->createFB();
+    auto outFB = g_pHyprRenderer->createFB();
     outFB->alloc(m_bufferSize.x, m_bufferSize.y, shm.format);
     outFB->setImageDescription(NColorManagement::DEFAULT_SRGB_IMAGE_DESCRIPTION);
 
@@ -526,10 +602,10 @@ bool CScreenshareFrame::copyShm() {
         LOGM(Log::ERR, "Can't copy: failed to begin rendering");
         return false;
     }
-    LOGM(Log::WARN, "[SSDBG] copyShm beginFullFakeRender ok renderMon={} fbSize={} outFB={}", g_pHyprRenderer->m_renderData.pMonitor ? g_pHyprRenderer->m_renderData.pMonitor->m_name : "<none>",
-         g_pHyprRenderer->m_renderData.fbSize, m_bufferSize);
+    LOGM(Log::WARN, "[SSDBG] copyShm beginFullFakeRender ok renderMon={} fbSize={} outFB={}",
+         g_pHyprRenderer->m_renderData.pMonitor ? g_pHyprRenderer->m_renderData.pMonitor->m_name : "<none>", g_pHyprRenderer->m_renderData.fbSize, m_bufferSize);
 
-    const auto OLDDEBUG = g_pHyprRenderer->m_screencopyDebugActive;
+    const auto OLDDEBUG                      = g_pHyprRenderer->m_screencopyDebugActive;
     g_pHyprRenderer->m_screencopyDebugActive = true;
     render();
 
