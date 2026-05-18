@@ -1263,12 +1263,16 @@ SP<ITarget> CMasterAlgorithm::getNextTarget(SP<ITarget> t, bool next, bool loop)
         return nullptr;
 
     const auto PNODE = getNodeFromTarget(t);
+    if (!PNODE)
+        return nullptr;
 
     auto       nodes = m_masterNodesData;
     if (!next)
         std::ranges::reverse(nodes);
 
     const auto NODEIT = std::ranges::find(nodes, PNODE);
+    if (NODEIT == nodes.end())
+        return nullptr;
 
     const bool ISMASTER = PNODE->isMaster;
 
