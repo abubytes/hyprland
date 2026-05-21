@@ -41,21 +41,33 @@ bool CPresentationFeedback::good() {
 }
 
 void CPresentationFeedback::sendQueued(WP<CQueuedPresentationData> data, const timespec& when, uint32_t untilRefreshNs, uint64_t seq, uint32_t reportedFlags) {
+    const auto DATA = data.lock();
+    if (!DATA || !good()) {
+        m_done = true;
+        return;
+    }
+
     auto client = m_resource->client();
 
-    if LIKELY (PROTO::outputs.contains(data->m_monitor->m_name) && data->m_wasPresented) {
-        if LIKELY (auto outputResources = PROTO::outputs.at(data->m_monitor->m_name)->outputResourcesFrom(client); !outputResources.empty()) {
+    const auto MONITOR   = DATA->m_monitor.lock();
+    const bool PRESENTED = DATA->m_wasPresented && MONITOR && MONITOR->m_output;
+
+    // Presentation queue entries can outlive the monitor they were attached to
+    // during DPMS, hotplug, or screencopy teardown. Without a monitor we cannot
+    // report valid presentation metadata, so discard the feedback instead.
+    if LIKELY (PRESENTED && PROTO::outputs.contains(MONITOR->m_name)) {
+        if LIKELY (auto outputResources = PROTO::outputs.at(MONITOR->m_name)->outputResourcesFrom(client); !outputResources.empty()) {
             for (const auto& r : outputResources) {
                 m_resource->sendSyncOutput(r->getResource()->resource());
             }
         }
     }
 
-    if (data->m_wasPresented) {
+    if (PRESENTED) {
         uint32_t flags = 0;
-        if (!data->m_monitor->m_tearingState.activelyTearing)
+        if (!MONITOR->m_tearingState.activelyTearing)
             flags |= WP_PRESENTATION_FEEDBACK_KIND_VSYNC;
-        if (data->m_zeroCopy)
+        if (DATA->m_zeroCopy)
             flags |= WP_PRESENTATION_FEEDBACK_KIND_ZERO_COPY;
         if (reportedFlags & Aquamarine::IOutput::AQ_OUTPUT_PRESENT_HW_CLOCK)
             flags |= WP_PRESENTATION_FEEDBACK_KIND_HW_CLOCK;
@@ -66,7 +78,7 @@ void CPresentationFeedback::sendQueued(WP<CQueuedPresentationData> data, const t
         if (sizeof(time_t) > 4)
             tv_sec = when.tv_sec >> 32;
 
-        uint32_t refreshNs = m_resource->version() == 1 && data->m_monitor->m_vrrActive && data->m_monitor->m_output->vrrCapable ? 0 : untilRefreshNs;
+        uint32_t refreshNs = m_resource->version() == 1 && MONITOR->m_vrrActive && MONITOR->m_output->vrrCapable ? 0 : untilRefreshNs;
 
         m_resource->sendPresented(sc<uint32_t>(tv_sec), sc<uint32_t>(when.tv_sec & 0xFFFFFFFF), sc<uint32_t>(when.tv_nsec), refreshNs, sc<uint32_t>(seq >> 32),
                                   sc<uint32_t>(seq & 0xFFFFFFFF), sc<wpPresentationFeedbackKind>(flags));
