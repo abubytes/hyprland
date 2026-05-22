@@ -5,6 +5,7 @@
 #include "core/Compositor.hpp"
 #include "core/Output.hpp"
 #include <aquamarine/output/Output.hpp>
+#include <unordered_map>
 
 CQueuedPresentationData::CQueuedPresentationData(SP<CWLSurfaceResource> surf) : m_surface(surf) {
     ;
@@ -123,18 +124,26 @@ void CPresentationProtocol::onGetFeedback(CWpPresentation* pMgr, wl_resource* su
 }
 
 void CPresentationProtocol::onPresented(PHLMONITOR pMonitor, const timespec& when, uint32_t untilRefreshNs, uint64_t seq, uint32_t reportedFlags) {
+    std::unordered_map<CWLSurfaceResource*, WP<CQueuedPresentationData>> queuedDataBySurface;
+    queuedDataBySurface.reserve(m_queue.size());
+
+    for (const auto& data : m_queue) {
+        if (!data->m_surface || (data->m_monitor && data->m_monitor != pMonitor))
+            continue;
+
+        queuedDataBySurface.try_emplace(data->m_surface.get(), data);
+    }
+
     for (auto const& feedback : m_feedbacks) {
         if (!feedback->m_surface)
             continue;
 
-        for (auto const& data : m_queue) {
-            if (!data->m_surface || data->m_surface != feedback->m_surface || (data->m_monitor && data->m_monitor != pMonitor))
-                continue;
+        const auto DATAIT = queuedDataBySurface.find(feedback->m_surface.get());
+        if (DATAIT == queuedDataBySurface.end())
+            continue;
 
-            feedback->sendQueued(data, when, untilRefreshNs, seq, reportedFlags);
-            feedback->m_done = true;
-            break;
-        }
+        feedback->sendQueued(DATAIT->second, when, untilRefreshNs, seq, reportedFlags);
+        feedback->m_done = true;
     }
 
     if (m_feedbacks.size() > 10000) {
