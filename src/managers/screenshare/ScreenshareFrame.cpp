@@ -284,7 +284,14 @@ void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
     if (!pMonitor)
         return;
 
-    const CRegion fullFrameDamage = CRegion(0, 0, m_bufferSize.x, m_bufferSize.y);
+    // user intent -> strategy: privacy masks must cover the sensitive surface in the COPIED frame.
+    // Virtual (split) monitor captures render their windows through the deferred render pass
+    // (m_renderPass.add) which only flushes at endRender(); an immediate g_pHyprRenderer->draw()
+    // here would paint the mask BEFORE those windows, so the windows then composite on top and the
+    // mask vanishes (works on physical monitors only because their mirror texture is drawn
+    // immediately too). Enqueue the masks into the same pass, after the scene, so they stay on top
+    // on both physical and virtual captures.
+    auto maskRect = [](const CRectPassElement::SRectData& data) { g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(data)); };
 
     // Draw these after the real scene so monitor/region captures hide sensitive surfaces.
     auto hidePopups = [&](Vector2D popupBaseOffset) {
@@ -299,7 +306,7 @@ void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
                     const auto surfBox = noScreenShareBoxForMonitor(pMonitor, m_session->m_captureBox, CBox{popupBaseOffset + popRel + localOff, size});
 
                     if LIKELY (surfBox.w > 0 && surfBox.h > 0)
-                        g_pHyprRenderer->draw(CRectPassElement::SRectData{.box = surfBox, .color = Colors::BLACK}, fullFrameDamage);
+                        maskRect(CRectPassElement::SRectData{.box = surfBox, .color = Colors::BLACK});
                 },
                 nullptr);
         };
@@ -318,7 +325,7 @@ void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
         const auto noScreenShareBox =
             noScreenShareBoxForMonitor(pMonitor, m_session->m_captureBox, CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)});
 
-        g_pHyprRenderer->draw(CRectPassElement::SRectData{.box = noScreenShareBox, .color = Colors::BLACK}, fullFrameDamage);
+        maskRect(CRectPassElement::SRectData{.box = noScreenShareBox, .color = Colors::BLACK});
 
         const auto     geom            = l->m_geometry;
         const Vector2D popupBaseOffset = REALPOS - Vector2D{geom.pos().x, geom.pos().y};
@@ -345,14 +352,12 @@ void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
         const auto rounding      = dontRound ? 0 : w->rounding() * pMonitor->m_scale;
         const auto roundingPower = dontRound ? 2.0f : w->roundingPower();
 
-        g_pHyprRenderer->draw(
-            CRectPassElement::SRectData{
-                .box           = noScreenShareBox,
-                .color         = Colors::BLACK,
-                .round         = rounding,
-                .roundingPower = roundingPower,
-            },
-            fullFrameDamage);
+        maskRect(CRectPassElement::SRectData{
+            .box           = noScreenShareBox,
+            .color         = Colors::BLACK,
+            .round         = rounding,
+            .roundingPower = roundingPower,
+        });
 
         if (w->m_isX11 || !w->m_popupHead)
             continue;

@@ -25,6 +25,14 @@ CScreenshareManager::CScreenshareManager() {
 }
 
 void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
+    // user intent -> strategy: never copy a screenshare frame while the session/seat is inactive
+    // (VT switch, suspend, mid-hotplug connector rescan). During those windows the GPU/EGL state is
+    // being torn down and importing the client dmabuf into an EGL image fails, which previously
+    // crashed in the renderbuffer teardown. Mirror the same guard the renderer uses before
+    // scheduling any frame (see CCompositor::scheduleFrameForMonitor).
+    if ((g_pCompositor->m_aqBackend->hasSession() && !g_pCompositor->m_aqBackend->session->active) || !g_pCompositor->m_sessionActive)
+        return;
+
     std::erase_if(m_sessions, [&](const WP<CScreenshareSession>& session) { return session.expired(); });
 
     if (!m_pendingFrames.empty())
