@@ -28,7 +28,7 @@ void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
     std::erase_if(m_sessions, [&](const WP<CScreenshareSession>& session) { return session.expired(); });
 
     if (!m_pendingFrames.empty())
-        LOGM(Log::WARN, "[SSDBG] outputCommit mon={} id={} virt={} physical={} pending={} sessions={}", monitor ? monitor->m_name : "<none>", monitor ? monitor->m_id : -1,
+        LOGM(Log::TRACE, "[SSDBG] outputCommit mon={} id={} virt={} physical={} pending={} sessions={}", monitor ? monitor->m_name : "<none>", monitor ? monitor->m_id : -1,
              monitor ? monitor->isVirtual() : false, monitor && monitor->physicalMonitor() ? monitor->physicalMonitor()->m_name : "<none>", m_pendingFrames.size(), m_sessions.size());
 
     // if no pending frames, and no sessions are sharing, then unblock ds
@@ -44,20 +44,20 @@ void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
 
     std::ranges::for_each(m_pendingFrames, [&](WP<CScreenshareFrame>& frame) {
         if (frame.expired()) {
-            LOGM(Log::WARN, "[SSDBG] outputCommit skip expired frame commitMon={}", monitor ? monitor->m_name : "<none>");
+            LOGM(Log::TRACE, "[SSDBG] outputCommit skip expired frame commitMon={}", monitor ? monitor->m_name : "<none>");
             return;
         }
 
         const bool FRAME_DONE = frame->done();
         if (!frame->m_shared || FRAME_DONE) {
-            LOGM(Log::WARN, "[SSDBG] outputCommit skip frame commitMon={} shared={} done={} copied={} failed={}", monitor ? monitor->m_name : "<none>", frame->m_shared, FRAME_DONE,
+            LOGM(Log::TRACE, "[SSDBG] outputCommit skip frame commitMon={} shared={} done={} copied={} failed={}", monitor ? monitor->m_name : "<none>", frame->m_shared, FRAME_DONE,
                  frame->m_copied, frame->m_failed);
             return;
         }
 
         const auto SESSIONMONITOR = frame->m_session->monitor();
         const bool MATCH          = isSameCommittedOutput(SESSIONMONITOR, monitor);
-        LOGM(Log::WARN, "[SSDBG] outputCommit consider commitMon={} sessionMon={} sessionPhys={} match={} type={} damage={} {} {} {}", monitor ? monitor->m_name : "<none>",
+        LOGM(Log::TRACE, "[SSDBG] outputCommit consider commitMon={} sessionMon={} sessionPhys={} match={} type={} damage={} {} {} {}", monitor ? monitor->m_name : "<none>",
              SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>", SESSIONMONITOR && SESSIONMONITOR->physicalMonitor() ? SESSIONMONITOR->physicalMonitor()->m_name : "<none>", MATCH,
              sc<int>(frame->m_session->m_type), frame->m_damage.getExtents().x, frame->m_damage.getExtents().y, frame->m_damage.getExtents().w, frame->m_damage.getExtents().h);
         if (!MATCH)
@@ -66,13 +66,13 @@ void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
         if (frame->m_session->m_type == SHARE_WINDOW) {
             CBox geometry = {frame->m_session->m_window->m_realPosition->value(), frame->m_session->m_window->m_realSize->value()};
             if (geometry.intersection({SESSIONMONITOR->m_position, SESSIONMONITOR->m_size}).empty()) {
-                LOGM(Log::WARN, "[SSDBG] outputCommit skip window outside sessionMon={} geom={} {} {} {}", SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>", geometry.x, geometry.y,
+                LOGM(Log::TRACE, "[SSDBG] outputCommit skip window outside sessionMon={} geom={} {} {} {}", SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>", geometry.x, geometry.y,
                      geometry.w, geometry.h);
                 return;
             }
         }
 
-        LOGM(Log::WARN, "[SSDBG] outputCommit copy frame commitMon={} sessionMon={}", monitor ? monitor->m_name : "<none>", SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>");
+        LOGM(Log::TRACE, "[SSDBG] outputCommit copy frame commitMon={} sessionMon={}", monitor ? monitor->m_name : "<none>", SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>");
         frame->copy();
     });
 

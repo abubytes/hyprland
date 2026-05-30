@@ -4,9 +4,51 @@
 #include "macros.hpp"
 #include "../Framebuffer.hpp"
 #include <hyprgraphics/egl/Egl.hpp>
+#include <cstring>
+#include <fcntl.h>
+#include <limits>
+#include <sys/stat.h>
 
 using namespace Hyprgraphics::Egl;
 using namespace Render::GL;
+
+static bool fitsInt32(uint32_t value) {
+    return value <= sc<uint32_t>(std::numeric_limits<int32_t>::max());
+}
+
+static bool shmReadTargetValid(const Aquamarine::SSHMAttrs& shm, uint8_t* pixelData, size_t bufLen, const SPixelFormat* format, uint32_t targetX, uint32_t targetY,
+                               uint32_t width, uint32_t height) {
+    if (!pixelData || !shm.success || !format || width == 0 || height == 0 || shm.stride <= 0 || shm.offset < 0)
+        return false;
+
+    if (!fitsInt32(targetX) || !fitsInt32(targetY) || !fitsInt32(width) || !fitsInt32(height))
+        return false;
+
+    const auto XOFFSET  = minStride(format, sc<int32_t>(targetX));
+    const auto ROWBYTES = minStride(format, sc<int32_t>(width));
+    if (XOFFSET < 0 || ROWBYTES <= 0 || sc<uint64_t>(XOFFSET) + sc<uint64_t>(ROWBYTES) > sc<uint64_t>(shm.stride))
+        return false;
+
+    const auto RELATIVE_REQUIRED = sc<uint64_t>(targetY) * sc<uint64_t>(shm.stride) + sc<uint64_t>(XOFFSET) +
+        sc<uint64_t>(height - 1) * sc<uint64_t>(shm.stride) + sc<uint64_t>(ROWBYTES);
+    if (RELATIVE_REQUIRED > bufLen)
+        return false;
+
+    struct stat st;
+    if (fstat(shm.fd, &st) != 0 || st.st_size < 0)
+        return false;
+
+    if (sc<uint64_t>(shm.offset) + RELATIVE_REQUIRED > sc<uint64_t>(st.st_size))
+        return false;
+
+    const auto FALLOCATE_RESULT = posix_fallocate(shm.fd, shm.offset, RELATIVE_REQUIRED);
+    if (FALLOCATE_RESULT != 0) {
+        LOGM(Log::ERR, "Can't copy: failed to reserve shm readPixels target: {}", std::strerror(FALLOCATE_RESULT));
+        return false;
+    }
+
+    return true;
+}
 
 CGLFramebuffer::CGLFramebuffer() : IFramebuffer() {}
 CGLFramebuffer::CGLFramebuffer(const std::string& name) : IFramebuffer(name) {}
@@ -109,12 +151,40 @@ void CGLFramebuffer::release() {
 }
 
 bool CGLFramebuffer::readPixels(CHLBufferReference buffer, uint32_t offsetX, uint32_t offsetY, uint32_t width, uint32_t height) {
+    if UNLIKELY (!buffer || !buffer->good()) {
+        LOGM(Log::ERR, "Can't copy: invalid readPixels target buffer");
+        return false;
+    }
+
     auto shm                      = buffer->shm();
     auto [pixelData, fmt, bufLen] = buffer->beginDataPtr(0); // no need for end, cuz it's shm
+
+    if UNLIKELY (!shm.success) {
+        LOGM(Log::ERR, "Can't copy: readPixels target is not a shm buffer");
+        return false;
+    }
+
+    const auto READWIDTH  = width > 0 ? width : sc<uint32_t>(m_size.x);
+    const auto READHEIGHT = height > 0 ? height : sc<uint32_t>(m_size.y);
+    const auto FBW        = sc<uint64_t>(m_size.x);
+    const auto FBH        = sc<uint64_t>(m_size.y);
+    const auto BUFW       = sc<uint64_t>(buffer->size.x);
+    const auto BUFH       = sc<uint64_t>(buffer->size.y);
+
+    if UNLIKELY (READWIDTH == 0 || READHEIGHT == 0 || sc<uint64_t>(offsetX) + READWIDTH > FBW || sc<uint64_t>(offsetY) + READHEIGHT > FBH ||
+                 sc<uint64_t>(offsetX) + READWIDTH > BUFW || sc<uint64_t>(offsetY) + READHEIGHT > BUFH) {
+        LOGM(Log::ERR, "Can't copy: readPixels rectangle {} {} {} {} exceeds framebuffer {} or buffer {}", offsetX, offsetY, READWIDTH, READHEIGHT, m_size, buffer->size);
+        return false;
+    }
 
     const auto PFORMAT = getPixelFormatFromDRM(shm.format);
     if (!PFORMAT) {
         LOGM(Log::ERR, "Can't copy: failed to find a pixel format");
+        return false;
+    }
+
+    if UNLIKELY (!shmReadTargetValid(shm, pixelData, bufLen, PFORMAT, offsetX, offsetY, READWIDTH, READHEIGHT)) {
+        LOGM(Log::ERR, "Can't copy: readPixels shm target range is invalid");
         return false;
     }
 
@@ -124,8 +194,10 @@ bool CGLFramebuffer::readPixels(CHLBufferReference buffer, uint32_t offsetX, uin
 
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
 
-    uint32_t packStride = minStride(PFORMAT, m_size.x);
-    int      glFormat   = PFORMAT->glFormat;
+    const auto PACKSTRIDE = minStride(PFORMAT, sc<int32_t>(READWIDTH));
+    const auto XOFFSET    = minStride(PFORMAT, sc<int32_t>(offsetX));
+    auto       targetData = pixelData + sc<uint64_t>(offsetY) * sc<uint64_t>(shm.stride) + XOFFSET;
+    int        glFormat   = PFORMAT->glFormat;
 
     if (PFORMAT->swizzle.has_value()) {
         if (PFORMAT->swizzle == SWIZZLE_RGBA)
@@ -141,13 +213,12 @@ bool CGLFramebuffer::readPixels(CHLBufferReference buffer, uint32_t offsetX, uin
 
     // This could be optimized by using a pixel buffer object to make this async,
     // but really clients should just use a dma buffer anyways.
-    if (packStride == sc<uint32_t>(shm.stride)) {
-        glReadPixels(offsetX, offsetY, width > 0 ? width : m_size.x, height > 0 ? height : m_size.y, glFormat, PFORMAT->glType, pixelData);
+    if (offsetX == 0 && offsetY == 0 && PACKSTRIDE == shm.stride) {
+        glReadPixels(offsetX, offsetY, READWIDTH, READHEIGHT, glFormat, PFORMAT->glType, pixelData);
     } else {
-        const auto h = height > 0 ? height : m_size.y;
-        for (size_t i = 0; i < h; ++i) {
+        for (size_t i = 0; i < READHEIGHT; ++i) {
             uint32_t y = i;
-            glReadPixels(offsetX, offsetY + y, width > 0 ? width : m_size.x, 1, glFormat, PFORMAT->glType, pixelData + i * shm.stride);
+            glReadPixels(offsetX, offsetY + y, READWIDTH, 1, glFormat, PFORMAT->glType, targetData + i * shm.stride);
         }
     }
 

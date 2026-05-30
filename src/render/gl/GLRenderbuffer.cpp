@@ -19,8 +19,13 @@ CGLRenderbuffer::~CGLRenderbuffer() {
 
     g_pHyprOpenGL->makeEGLCurrent();
 
-    unbind();
-    m_framebuffer->release();
+    // m_framebuffer is only allocated after createEGLImage() succeeds in the ctor; an early
+    // ctor failure (e.g. dmabuf import failing mid-hotplug) leaves it null while we still get
+    // destroyed. Guard it like m_rbo/m_image below so teardown of a partial rb doesn't segfault.
+    if (m_framebuffer) {
+        unbind();
+        m_framebuffer->release();
+    }
 
     if (m_rbo)
         glDeleteRenderbuffers(1, &m_rbo);

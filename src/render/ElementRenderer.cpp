@@ -220,7 +220,7 @@ void IElementRenderer::drawSurface(WP<CSurfacePassElement> element, const CRegio
 
     if (!m_data.texture) {
         if (g_pHyprRenderer->m_screencopyDebugActive)
-            Log::logger->log(Log::WARN, "[SSDBG] element drawSurface skip no-texture mon={} kind={} name={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
+            Log::logger->log(Log::TRACE, "[SSDBG] element drawSurface skip no-texture mon={} kind={} name={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
                              m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"), m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"));
         return;
     }
@@ -231,7 +231,7 @@ void IElementRenderer::drawSurface(WP<CSurfacePassElement> element, const CRegio
     // uploading to the GPU.
     if (!TEXTURE->ok()) {
         if (g_pHyprRenderer->m_screencopyDebugActive)
-            Log::logger->log(Log::WARN, "[SSDBG] element drawSurface skip bad-texture mon={} kind={} name={} texSize={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
+            Log::logger->log(Log::TRACE, "[SSDBG] element drawSurface skip bad-texture mon={} kind={} name={} texSize={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
                              m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"), m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"),
                              TEXTURE->m_size);
         return;
@@ -255,7 +255,7 @@ void IElementRenderer::drawSurface(WP<CSurfacePassElement> element, const CRegio
 
     if (windowBox.width <= 1 || windowBox.height <= 1) {
         if (g_pHyprRenderer->m_screencopyDebugActive)
-            Log::logger->log(Log::WARN, "[SSDBG] element drawSurface skip tiny-box mon={} kind={} name={} box={} {} {} {} scale={} texSize={}",
+            Log::logger->log(Log::TRACE, "[SSDBG] element drawSurface skip tiny-box mon={} kind={} name={} box={} {} {} {} scale={} texSize={}",
                              m_data.pMonitor ? m_data.pMonitor->m_name : "<none>", m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"),
                              m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"), windowBox.x, windowBox.y, windowBox.w, windowBox.h,
                              m_data.pMonitor ? m_data.pMonitor->m_scale : 0, TEXTURE->m_size);
@@ -275,7 +275,7 @@ void IElementRenderer::drawSurface(WP<CSurfacePassElement> element, const CRegio
     auto clipRegion   = element->visibleRegion(cancelRender);
     if (cancelRender) {
         if (g_pHyprRenderer->m_screencopyDebugActive)
-            Log::logger->log(Log::WARN, "[SSDBG] element drawSurface skip visible-cancel mon={} kind={} name={} box={} {} {} {}",
+            Log::logger->log(Log::TRACE, "[SSDBG] element drawSurface skip visible-cancel mon={} kind={} name={} box={} {} {} {}",
                              m_data.pMonitor ? m_data.pMonitor->m_name : "<none>", m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"),
                              m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"), windowBox.x, windowBox.y, windowBox.w, windowBox.h);
         return;

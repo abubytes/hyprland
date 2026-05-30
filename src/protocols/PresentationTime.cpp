@@ -7,6 +7,19 @@
 #include <aquamarine/output/Output.hpp>
 #include <unordered_map>
 
+static bool isSamePresentedOutput(PHLMONITOR queuedMonitor, PHLMONITOR presentedMonitor) {
+    if (!queuedMonitor || !presentedMonitor)
+        return false;
+
+    if (queuedMonitor == presentedMonitor)
+        return true;
+
+    const auto QUEUEDPHYSICAL    = queuedMonitor->physicalMonitor();
+    const auto PRESENTEDPHYSICAL = presentedMonitor->physicalMonitor();
+
+    return QUEUEDPHYSICAL && PRESENTEDPHYSICAL && QUEUEDPHYSICAL == PRESENTEDPHYSICAL;
+}
+
 CQueuedPresentationData::CQueuedPresentationData(SP<CWLSurfaceResource> surf) : m_surface(surf) {
     ;
 }
@@ -91,7 +104,7 @@ void CPresentationFeedback::sendQueued(WP<CQueuedPresentationData> data, const t
 
 CPresentationProtocol::CPresentationProtocol(const wl_interface* iface, const int& ver, const std::string& name) : IWaylandProtocol(iface, ver, name) {
     static auto P = Event::bus()->m_events.monitor.removed.listen(
-        [this](PHLMONITOR mon) { std::erase_if(m_queue, [mon](const auto& other) { return !other->m_surface || other->m_monitor == mon; }); });
+        [this](PHLMONITOR mon) { std::erase_if(m_queue, [mon](const auto& other) { return !other->m_surface || isSamePresentedOutput(other->m_monitor.lock(), mon); }); });
 }
 
 void CPresentationProtocol::bindManager(wl_client* client, void* data, uint32_t ver, uint32_t id) {
@@ -128,7 +141,7 @@ void CPresentationProtocol::onPresented(PHLMONITOR pMonitor, const timespec& whe
     queuedDataBySurface.reserve(m_queue.size());
 
     for (const auto& data : m_queue) {
-        if (!data->m_surface || (data->m_monitor && data->m_monitor != pMonitor))
+        if (!data->m_surface || (data->m_monitor && !isSamePresentedOutput(data->m_monitor.lock(), pMonitor)))
             continue;
 
         queuedDataBySurface.try_emplace(data->m_surface.get(), data);
@@ -161,7 +174,7 @@ void CPresentationProtocol::onPresented(PHLMONITOR pMonitor, const timespec& whe
     }
 
     std::erase_if(m_feedbacks, [](const auto& other) { return !other->m_surface || other->m_done; });
-    std::erase_if(m_queue, [pMonitor](const auto& other) { return !other->m_surface || other->m_monitor == pMonitor || !other->m_monitor || other->m_done; });
+    std::erase_if(m_queue, [pMonitor](const auto& other) { return !other->m_surface || !other->m_monitor || isSamePresentedOutput(other->m_monitor.lock(), pMonitor) || other->m_done; });
 }
 
 void CPresentationProtocol::queueData(UP<CQueuedPresentationData>&& data) {

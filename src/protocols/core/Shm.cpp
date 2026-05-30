@@ -12,6 +12,22 @@
 using namespace Hyprgraphics::Egl;
 using namespace Hyprutils::OS;
 
+static bool shmBufferRangeValid(size_t poolSize, int32_t offset, int32_t w, int32_t h, int32_t stride, uint32_t fmt) {
+    if (offset < 0 || w <= 0 || h <= 0 || stride <= 0)
+        return false;
+
+    const auto PFORMAT = getPixelFormatFromDRM(NFormatUtils::shmToDRM(fmt));
+    if (!PFORMAT)
+        return false;
+
+    const auto MINSTRIDE = minStride(PFORMAT, w);
+    if (MINSTRIDE <= 0 || stride < MINSTRIDE)
+        return false;
+
+    const auto REQUIRED = sc<uint64_t>(offset) + sc<uint64_t>(stride) * sc<uint64_t>(h - 1) + sc<uint64_t>(MINSTRIDE);
+    return REQUIRED <= poolSize;
+}
+
 CWLSHMBuffer::CWLSHMBuffer(WP<CWLSHMPoolResource> pool_, uint32_t id, int32_t offset_, const Vector2D& size_, int32_t stride_, uint32_t fmt_) {
     if UNLIKELY (!pool_)
         return;
@@ -71,7 +87,7 @@ void CWLSHMBuffer::endDataPtr() {
 }
 
 bool CWLSHMBuffer::good() {
-    return true;
+    return m_pool && m_pool->m_data && m_pool->m_data != MAP_FAILED && shmBufferRangeValid(m_pool->m_size, m_offset, size.x, size.y, m_stride, m_fmt);
 }
 
 void CWLSHMBuffer::update(const CRegion& damage) {
@@ -150,6 +166,11 @@ CWLSHMPoolResource::CWLSHMPoolResource(UP<CWlShmPool>&& resource_, CFileDescript
 
         if UNLIKELY (offset < 0 || w <= 0 || h <= 0 || stride <= 0) {
             r->error(WL_SHM_ERROR_INVALID_STRIDE, "Invalid stride, w, h, or offset");
+            return;
+        }
+
+        if UNLIKELY (!shmBufferRangeValid(m_pool->m_size, offset, w, h, stride, fmt)) {
+            r->error(WL_SHM_ERROR_INVALID_STRIDE, "The wl_shm buffer exceeds its pool bounds");
             return;
         }
 

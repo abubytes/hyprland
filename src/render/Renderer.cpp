@@ -715,7 +715,7 @@ void IHyprRenderer::renderLogicalMonitorForScreencopy(PHLMONITOR pMonitor, const
 
             const auto POS  = ls->m_realPosition->value();
             const auto SIZE = ls->m_realSize->value();
-            Log::logger->log(Log::WARN, "[SSDBG] renderLogical layer mon={} ns={} layer={} pos={} size={} geom={} {} {} {} mapped={}", pMonitor->m_name, ls->m_namespace,
+            Log::logger->log(Log::TRACE, "[SSDBG] renderLogical layer mon={} ns={} layer={} pos={} size={} geom={} {} {} {} mapped={}", pMonitor->m_name, ls->m_namespace,
                              sc<int>(ls->m_layer), POS, SIZE, ls->m_geometry.x, ls->m_geometry.y, ls->m_geometry.w, ls->m_geometry.h, ls->m_mapped);
         }
     }
@@ -724,7 +724,7 @@ void IHyprRenderer::renderLogicalMonitorForScreencopy(PHLMONITOR pMonitor, const
         if (!w || w->m_workspace != pMonitor->m_activeWorkspace)
             continue;
 
-        Log::logger->log(Log::WARN, "[SSDBG] renderLogical window mon={} title={} winMon={} pos={} size={} visible={} mapped={} hidden={} floating={} pinned={} fullscreen={}",
+        Log::logger->log(Log::TRACE, "[SSDBG] renderLogical window mon={} title={} winMon={} pos={} size={} visible={} mapped={} hidden={} floating={} pinned={} fullscreen={}",
                          pMonitor->m_name, w->m_title, w->m_monitor ? w->m_monitor->m_name : "<none>", w->m_realPosition->value(), w->m_realSize->value(), w->visibleOnMonitor(pMonitor),
                          w->m_isMapped, w->isHidden(), w->m_isFloating, w->m_pinned, w->isFullscreen());
     }
@@ -735,7 +735,7 @@ void IHyprRenderer::renderLogicalMonitorForScreencopy(PHLMONITOR pMonitor, const
     renderVirtualMonitorWorkspaces(pMonitor, {pMonitor}, now);
 
     const auto DAMAGE_EXTENTS = m_renderData.damage.getExtents();
-    Log::logger->log(Log::WARN, "[SSDBG] renderLogical end mon={} renderDamageExtents={} {} {} {}", pMonitor->m_name, DAMAGE_EXTENTS.x, DAMAGE_EXTENTS.y, DAMAGE_EXTENTS.w,
+    Log::logger->log(Log::TRACE, "[SSDBG] renderLogical end mon={} renderDamageExtents={} {} {} {}", pMonitor->m_name, DAMAGE_EXTENTS.x, DAMAGE_EXTENTS.y, DAMAGE_EXTENTS.w,
                      DAMAGE_EXTENTS.h);
 }
 
@@ -1076,7 +1076,7 @@ void IHyprRenderer::draw(const CTexPassElement::SRenderData& data, const CRegion
     if (m_screencopyDebugActive) {
         auto       DAMAGE = damage;
         const auto DMG    = DAMAGE.getExtents();
-        Log::logger->log(Log::WARN, "[SSDBG] drawTex mon={} box={} {} {} {} texSize={} damage={} {} {} {} customUV={} a={}",
+        Log::logger->log(Log::TRACE, "[SSDBG] drawTex mon={} box={} {} {} {} texSize={} damage={} {} {} {} customUV={} a={}",
                          m_renderData.pMonitor ? m_renderData.pMonitor->m_name : "<none>", data.box.x, data.box.y, data.box.w, data.box.h, data.tex ? data.tex->m_size : Vector2D{},
                          DMG.x, DMG.y, DMG.w, DMG.h, data.allowCustomUV, data.a);
     }
