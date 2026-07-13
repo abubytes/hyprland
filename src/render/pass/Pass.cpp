@@ -229,7 +229,7 @@ CRegion CRenderPass::render(const CRegion& damage_) {
                              DAMAGE_EXTS.y, DAMAGE_EXTS.w, DAMAGE_EXTS.h);
         }
         g_pHyprRenderer->draw(el.element, el.elementDamage);
-
+    }
 
     if (*PDEBUGPASS) {
         renderDebugData();

@@ -833,12 +833,13 @@ bool truthy(const std::string& str) {
         return true;
 
     // clang-format off
-    auto str_view = str | std::views::transform([](unsigned char ch) -> char {
-        return sc<char>(std::tolower(ch));
-    });
+    std::string lowered;
+    lowered.reserve(str.size());
+    for (unsigned char ch : str)
+        lowered.push_back(sc<char>(std::tolower(ch)));
 
     return [&](auto&&... prefixes) -> bool {
-        return (... || std::ranges::starts_with(str_view, prefixes));
+        return (... || std::string_view{lowered}.starts_with(prefixes));
     }("true"sv, "yes"sv, "on"sv);
     // clang-format on
 }

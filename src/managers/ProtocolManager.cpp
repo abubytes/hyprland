@@ -1,4 +1,5 @@
 #include "ProtocolManager.hpp"
+#include "../state/MonitorState.hpp"
 
 #include "../config/ConfigValue.hpp"
 
@@ -152,8 +153,7 @@ void CProtocolManager::ensureOutputForMonitor(PHLMONITOR pMonitor) {
             return;
         }
 
-        EXISTING->remove();
-        PROTO::outputs.erase(pMonitor->m_name);
+        retireOutputGlobal(pMonitor->m_name);
         m_modeChangeListeners.erase(pMonitor->m_name);
     }
 

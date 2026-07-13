@@ -534,13 +534,13 @@ void IHyprRenderer::renderWorkspaceWindowsForMonitor(PHLMONITOR pRenderMonitor, 
     windows.reserve(Desktop::windowState()->windows().size());
 
     for (auto const& w : Desktop::windowState()->windows()) {
-        if (w->isHidden() || (!w->m_isMapped && !w->m_fadingOut))
+        if (w->isHidden() || !w->m_isMapped)
             continue;
 
         if (w->m_pinned || w->m_workspace != pWorkspace)
             continue;
 
-        if (!w->visibleOnMonitor(pLogicalMonitor) && !w->m_fadingOut)
+        if (!w->visibleOnMonitor(pLogicalMonitor))
             continue;
 
         windows.emplace_back(w);
@@ -553,7 +553,7 @@ void IHyprRenderer::renderWorkspaceWindowsForMonitor(PHLMONITOR pRenderMonitor, 
         if (pWorkspace->m_isSpecialWorkspace != w->onSpecialWorkspace())
             return false;
 
-        if (pWorkspace->m_hasFullscreenWindow && !w->isFullscreen() && !w->shouldRenderOverFullscreen() && !w->isFadingOutUnderFullscreen())
+        if (Fullscreen::controller()->hasFullscreen(pWorkspace) && !Fullscreen::controller()->isFullscreen(w.lock()) && !w->shouldRenderOverFullscreen() && !w->isFadingOutUnderFullscreen())
             return false;
 
         return true;
@@ -568,23 +568,25 @@ void IHyprRenderer::renderWorkspaceWindowsForMonitor(PHLMONITOR pRenderMonitor, 
             continue;
         }
 
-        if (!w->isFullscreen())
+        if (!Fullscreen::controller()->isFullscreen(w.lock()))
             renderWindow(w.lock(), pRenderMonitor, time, true, RENDER_PASS_MAIN);
     }
 
-    if (lastWindow && !lastWindow->isFullscreen())
+    if (lastWindow && !Fullscreen::controller()->isFullscreen(lastWindow))
         renderWindow(lastWindow, pRenderMonitor, time, true, RENDER_PASS_MAIN);
+
+    renderFadeouts(pRenderMonitor, Desktop::FADEOUT_PLANE_WINDOW_TILED, pWorkspace);
 
     for (auto& w : windows) {
         if (w->m_isFloating || !shouldRenderInWorkspace(w))
             continue;
 
-        if (w->isFullscreen())
-            renderWindow(w.lock(), pRenderMonitor, time, pWorkspace->m_fullscreenMode != FSMODE_FULLSCREEN, RENDER_PASS_ALL);
+        if (Fullscreen::controller()->isFullscreen(w.lock()))
+            renderWindow(w.lock(), pRenderMonitor, time, Fullscreen::controller()->getFullscreenModes(pWorkspace).internal != Fullscreen::FSMODE_FULLSCREEN, RENDER_PASS_ALL);
     }
 
     for (auto& w : windows) {
-        if (!w || w->m_isFloating || !shouldRenderInWorkspace(w) || w->isFullscreen())
+        if (!w || w->m_isFloating || !shouldRenderInWorkspace(w) || Fullscreen::controller()->isFullscreen(w.lock()))
             continue;
 
         renderWindow(w.lock(), pRenderMonitor, time, true, RENDER_PASS_POPUP);
@@ -594,16 +596,18 @@ void IHyprRenderer::renderWorkspaceWindowsForMonitor(PHLMONITOR pRenderMonitor, 
         if (!w || !w->m_isFloating || !shouldRenderInWorkspace(w))
             continue;
 
-        if (pWorkspace->m_hasFullscreenWindow && !w->shouldRenderOverFullscreen() && !w->isFadingOutUnderFullscreen())
+        if (Fullscreen::controller()->hasFullscreen(pWorkspace) && !w->shouldRenderOverFullscreen() && !w->isFadingOutUnderFullscreen())
             continue;
 
         renderWindow(w.lock(), pRenderMonitor, time, true, RENDER_PASS_ALL);
     }
+
+    renderFadeouts(pRenderMonitor, Desktop::FADEOUT_PLANE_WINDOW_FLOATING, pWorkspace);
 }
 
 void IHyprRenderer::renderPinnedWindowsForMonitor(PHLMONITOR pRenderMonitor, const Time::steady_tp& time) {
     for (auto const& w : Desktop::windowState()->windows()) {
-        if (w->isHidden() && !w->m_isMapped && !w->m_fadingOut)
+        if (w->isHidden() && !w->m_isMapped)
             continue;
 
         if (!w->m_pinned || !w->m_isFloating)
@@ -692,7 +696,7 @@ void IHyprRenderer::renderLogicalMonitorForScreencopy(PHLMONITOR pMonitor, const
 
     size_t workspaceWindows = 0, visibleWindows = 0, pinnedWindows = 0;
     for (auto const& w : Desktop::windowState()->windows()) {
-        if (!w || (w->isHidden() && !w->m_isMapped && !w->m_fadingOut))
+        if (!w || (w->isHidden() && !w->m_isMapped))
             continue;
 
         if (w->m_pinned) {
@@ -733,7 +737,7 @@ void IHyprRenderer::renderLogicalMonitorForScreencopy(PHLMONITOR pMonitor, const
 
         Log::logger->log(Log::TRACE, "[SSDBG] renderLogical window mon={} title={} winMon={} pos={} size={} visible={} mapped={} hidden={} floating={} pinned={} fullscreen={}",
                          pMonitor->m_name, w->m_title, w->m_monitor ? w->m_monitor->m_name : "<none>", w->m_realPosition->value(), w->m_realSize->value(), w->visibleOnMonitor(pMonitor),
-                         w->m_isMapped, w->isHidden(), w->m_isFloating, w->m_pinned, w->isFullscreen());
+                         w->m_isMapped, w->isHidden(), w->m_isFloating, w->m_pinned, Fullscreen::controller()->isFullscreen(w));
     }
 
     const auto OLDDEBUG       = m_screencopyDebugActive;

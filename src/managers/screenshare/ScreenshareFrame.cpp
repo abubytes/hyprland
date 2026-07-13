@@ -48,7 +48,7 @@ static bool shouldMaskNoScreenShareWindow(PHLWINDOW pWindow, PHLMONITOR pMonitor
         return false;
 
     const auto PWORKSPACE = pWindow->m_workspace;
-    if (!PWORKSPACE && !pWindow->m_fadingOut)
+    if (!PWORKSPACE)
         return false;
 
     if (pWindow->m_pinned)
@@ -278,7 +278,7 @@ bool CScreenshareFrame::hasNoScreenShareOverlays(PHLMONITOR pMonitor) {
 
         const auto PWORKSPACE = w->m_workspace;
 
-        if UNLIKELY (!PWORKSPACE && !w->m_fadingOut && w->alphaValue(WINDOW_ALPHA_FADE) * w->alphaValue(WINDOW_ALPHA_FULLSCREEN) != 0.f)
+        if UNLIKELY (!PWORKSPACE && w->alphaValue(WINDOW_ALPHA_FADE) * w->alphaValue(WINDOW_ALPHA_FULLSCREEN) != 0.f)
             continue;
 
         const auto renderOffset = PWORKSPACE && !w->m_pinned ? PWORKSPACE->m_renderOffset->value() : Vector2D{};
@@ -462,7 +462,6 @@ void CScreenshareFrame::renderMonitor() {
                 .box                = monbox,
                 .flipEndFrame       = true,
                 .cmBackToSRGB       = !IS_CM_AWARE,
-                .cmBackToSRGBSource = !IS_CM_AWARE ? SOURCE_MONITOR : nullptr,
             },
             {0, 0, PMONITOR->m_pixelSize.x, PMONITOR->m_pixelSize.y});
         g_pHyprRenderer->m_renderData.renderModif.enabled = OLD;
