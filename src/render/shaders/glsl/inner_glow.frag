@@ -8,10 +8,7 @@ precision     highp float;
 in vec4       v_color;
 in vec2       v_texcoord;
 
-uniform int   sourceTF; // eTransferFunction
-uniform int   targetTF; // eTransferFunction
-uniform mat3  targetPrimariesXYZ;
-
+uniform vec4  colorSRGB;
 uniform vec2  topLeft;
 uniform vec2  bottomRight;
 uniform vec2  fullSize;
@@ -20,38 +17,33 @@ uniform float roundingPower;
 uniform float range;
 uniform float shadowPower;
 
-#if USE_CM
-#include "cm_helpers.glsl"
-#include "CM.glsl"
-#endif
+// Gradients are in OkLabA!!!! {l, a, b, alpha}
+uniform vec4  gradient[10];
+uniform vec4  gradient2[10];
+uniform int   gradientLength;
+uniform int   gradient2Length;
+uniform float angle;
+uniform float angle2;
+uniform float gradientLerp;
+uniform float alpha;
 
 #include "inner_glow.glsl"
 
 layout(location = 0) out vec4 fragColor;
+#if USE_MIRROR
+layout(location = 1) out vec4 mirrorColor;
+#endif
 void main() {
     vec4 pixColor = v_color;
-
-    fragColor = getInnerGlow(pixColor, v_texcoord, radius, roundingPower, topLeft, fullSize, range, shadowPower, bottomRight
-#if USE_CM
-                             ,
-                             sourceTF, targetTF, convertMatrix, srcTFRange, dstTFRange
-#if USE_ICC
-                             ,
-                             iccLut3D, iccLutSize
+#if USE_MIRROR
+    vec4[2] pixColors =
 #else
-#if USE_TONEMAP || USE_SDR_MOD
-                             ,
-                             targetPrimariesXYZ
+    fragColor =
 #endif
-#if USE_TONEMAP
-                             ,
-                             maxLuminance, dstMaxLuminance, dstRefLuminance, srcRefLuminance
+    getInnerGlow(pixColor, colorSRGB, v_texcoord, radius, roundingPower, topLeft, fullSize, range, shadowPower, bottomRight,
+                 gradientLength, gradient, angle, gradient2Length, gradient2, angle2, gradientLerp, alpha);
+#if USE_MIRROR
+    fragColor   = pixColors[0];
+    mirrorColor = pixColors[1];
 #endif
-#if USE_SDR_MOD
-                             ,
-                             sdrSaturation, sdrBrightnessMultiplier
-#endif
-#endif
-#endif
-    );
 }

@@ -5,7 +5,9 @@
 #include "../../view/Window.hpp"
 #include "../../types/OverridableVar.hpp"
 #include "../../../event/EventBus.hpp"
+#include "desktop/rule/windowRule/WindowRuleEffectContainer.hpp"
 
+#include <string>
 #include <tuple>
 
 using namespace Desktop;
@@ -50,8 +52,9 @@ std::unordered_set<CWindowRuleEffectContainer::storageType> CWindowRuleApplicato
                    std::pair{std::ref(m_tearing), [this] { return tearingEffect(); }}, std::pair{std::ref(m_xray), [this] { return xrayEffect(); }},
                    std::pair{std::ref(m_renderUnfocused), [this] { return renderUnfocusedEffect(); }},
                    std::pair{std::ref(m_noFollowMouse), [this] { return noFollowMouseEffect(); }}, std::pair{std::ref(m_noScreenShare), [this] { return noScreenShareEffect(); }},
-                   std::pair{std::ref(m_noVRR), [this] { return noVRREffect(); }}, std::pair{std::ref(m_persistentSize), [this] { return persistentSizeEffect(); }},
-                   std::pair{std::ref(m_stayFocused), [this] { return stayFocusedEffect(); }}, std::pair{std::ref(m_idleInhibitMode), [this] { return idleInhibitModeEffect(); }},
+                   std::pair{std::ref(m_noVRR), [this] { return noVRREffect(); }}, std::pair{std::ref(m_noAutoHDR), [this] { return noAutoHDREffect(); }},
+                   std::pair{std::ref(m_persistentSize), [this] { return persistentSizeEffect(); }}, std::pair{std::ref(m_stayFocused), [this] { return stayFocusedEffect(); }},
+                   std::pair{std::ref(m_idleInhibitMode), [this] { return idleInhibitModeEffect(); }},
                    std::pair{std::ref(m_confinePointer), [this] { return confinePointerEffect(); }}, std::pair{std::ref(m_borderSize), [this] { return borderSizeEffect(); }},
                    std::pair{std::ref(m_rounding), [this] { return roundingEffect(); }}, std::pair{std::ref(m_roundingPower), [this] { return roundingPowerEffect(); }},
                    std::pair{std::ref(m_scrollMouse), [this] { return scrollMouseEffect(); }}, std::pair{std::ref(m_scrollTouchpad), [this] { return scrollTouchpadEffect(); }},
@@ -156,7 +159,7 @@ CWindowRuleApplicator::SRuleResult CWindowRuleApplicator::applyDynamicRule(const
                 break;
             }
             case WINDOW_RULE_EFFECT_TAG: {
-                m_dynamicTags.emplace_back(std::make_pair<>(effect, rule->getPropertiesMask()));
+                m_dynamicTags.emplace_back(effect, rule->getPropertiesMask());
                 m_tagKeeper.applyTag(effect, true);
                 result.tagsChanged = true;
                 break;
@@ -337,6 +340,16 @@ CWindowRuleApplicator::SRuleResult CWindowRuleApplicator::applyDynamicRule(const
                 m_noVRR.second |= rule->getPropertiesMask();
                 break;
             }
+            case WINDOW_RULE_EFFECT_NO_AUTO_HDR: {
+                m_noAutoHDR.first.set(std::get<bool>(value), Types::PRIORITY_WINDOW_RULE);
+                m_noAutoHDR.second |= rule->getPropertiesMask();
+                break;
+            }
+            case WINDOW_RULE_EFFECT_TONEMAP: {
+                m_tonemap.first.set(std::get<int64_t>(value), Types::PRIORITY_WINDOW_RULE);
+                m_noAutoHDR.second |= rule->getPropertiesMask();
+                break;
+            }
             case WINDOW_RULE_EFFECT_STAY_FOCUSED: {
                 m_stayFocused.first.set(std::get<bool>(value), Types::PRIORITY_WINDOW_RULE);
                 m_stayFocused.second |= rule->getPropertiesMask();
@@ -473,8 +486,8 @@ bool CWindowRuleApplicator::readStaticRules(bool preRead) {
 
     static_ = {};
 
-    std::vector<SP<CWindowRule>> execRules;
-    bool                         tagsWereChanged = false;
+    m_execRules.clear();
+    bool tagsWereChanged = false;
 
     for (const auto& r : ruleEngine()->rules()) {
         if (r->type() != RULE_TYPE_WINDOW)
@@ -486,7 +499,7 @@ bool CWindowRuleApplicator::readStaticRules(bool preRead) {
             continue;
 
         if (wr->isExecRule()) {
-            execRules.emplace_back(wr);
+            m_execRules.emplace_back(wr);
             continue;
         }
 
@@ -501,7 +514,7 @@ bool CWindowRuleApplicator::readStaticRules(bool preRead) {
     if (static_.content != NContentType::CONTENT_TYPE_NONE)
         propsToRecheck |= RULE_PROP_CONTENT;
 
-    for (const auto& wr : execRules) {
+    for (const auto& wr : m_execRules) {
         applyStaticRule(wr);
         applyDynamicRule(wr);
         if (!preRead)
@@ -523,6 +536,10 @@ void CWindowRuleApplicator::recheckStaticRules() {
         if (!wr->matches(m_window.lock(), true))
             continue;
 
+        applyStaticRule(wr);
+    }
+
+    for (const auto& wr : m_execRules) {
         applyStaticRule(wr);
     }
 }
@@ -547,6 +564,14 @@ void CWindowRuleApplicator::propertiesChanged(std::underlying_type_t<eRuleProper
             continue;
 
         const auto RES = applyDynamicRule(WR);
+        needsRelayout  = needsRelayout || RES.needsRelayout;
+    }
+
+    for (const auto& wr : m_execRules) {
+        if (!(wr->getPropertiesMask() & props) && !setsIntersect(wr->effectsSet(), effectsNeedingRecheck))
+            continue;
+
+        const auto RES = applyDynamicRule(wr);
         needsRelayout  = needsRelayout || RES.needsRelayout;
     }
 

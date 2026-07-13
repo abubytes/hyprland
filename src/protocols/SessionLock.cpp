@@ -5,7 +5,8 @@
 #include "core/Compositor.hpp"
 #include "core/Output.hpp"
 #include "../Compositor.hpp"
-#include "../helpers/Monitor.hpp"
+#include "../output/Monitor.hpp"
+#include "../state/MonitorState.hpp"
 #include "../render/Renderer.hpp"
 #include "../desktop/state/FocusState.hpp"
 
@@ -211,7 +212,7 @@ void CSessionLockProtocol::onGetLockSurface(CExtSessionLockV1* lock, uint32_t id
         return;
     }
     const auto OUTPUTM  = OUTPUTRES->m_monitor.lock();
-    auto       PMONITOR = OUTPUTM && OUTPUTM->isVirtual() ? OUTPUTM : (OUTPUTM ? g_pCompositor->getPrimaryLogicalMonitor(OUTPUTM) : nullptr);
+    auto       PMONITOR = OUTPUTM && OUTPUTM->isVirtual() ? OUTPUTM : (OUTPUTM ? State::monitorState()->getPrimaryLogicalMonitor(OUTPUTM) : nullptr);
     if (!PMONITOR) {
         LOGM(Log::ERR, "onGetLockSurface: monitor is gone for output resource");
         return;
@@ -239,4 +240,24 @@ void CSessionLockProtocol::onGetLockSurface(CExtSessionLockV1* lock, uint32_t id
 
 bool CSessionLockProtocol::isLocked() {
     return m_locked;
+}
+
+void CSessionLockProtocol::forceUnlock() {
+    m_locked = false;
+
+    for (const auto& l : m_locks) {
+        l->sendDenied();
+    }
+
+    PROTO::lockNotify->onUnlocked();
+}
+
+void CSessionLockProtocol::forceLock() {
+    m_locked = true;
+
+    for (const auto& l : m_locks) {
+        l->sendLocked();
+    }
+
+    PROTO::lockNotify->onLocked();
 }

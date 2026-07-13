@@ -13,7 +13,6 @@ hyprland.pc
 _deps
 
 build/
-.hyprdeps/
 result*
 /.pre-commit-config.yaml
 /.vscode/
@@ -53,3 +52,7 @@ example/hyprland.desktop
 **/#*.*#
 
 debug-tools/flamegraph
+
+meta/hl.meta.lua
+
+hyprtester/pointer-scroll.txt

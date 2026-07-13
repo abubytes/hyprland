@@ -26,21 +26,17 @@ TEST(Helpers, isDirectionString) {
     EXPECT_TRUE(isDirection("d"));
     EXPECT_TRUE(isDirection("t"));
     EXPECT_TRUE(isDirection("b"));
+    EXPECT_TRUE(isDirection("left"));
+    EXPECT_TRUE(isDirection("right"));
+    EXPECT_TRUE(isDirection("up"));
+    EXPECT_TRUE(isDirection("down"));
+    EXPECT_TRUE(isDirection("top"));
+    EXPECT_TRUE(isDirection("bottom"));
     EXPECT_FALSE(isDirection("x"));
-    EXPECT_FALSE(isDirection("left"));
+    EXPECT_FALSE(isDirection("leftover"));
+    EXPECT_FALSE(isDirection("desc:Monitor"));
     EXPECT_FALSE(isDirection(""));
-}
-
-TEST(Helpers, isDirectionChar) {
-    EXPECT_TRUE(isDirection('l'));
-    EXPECT_TRUE(isDirection('r'));
-    EXPECT_TRUE(isDirection('u'));
-    EXPECT_TRUE(isDirection('d'));
-    EXPECT_TRUE(isDirection('t'));
-    EXPECT_TRUE(isDirection('b'));
-    EXPECT_FALSE(isDirection('x'));
-    EXPECT_FALSE(isDirection('0'));
-    EXPECT_FALSE(isDirection(' '));
+    EXPECT_FALSE(isDirection("i_am_single"));
 }
 
 // normalizeAngleRad
@@ -96,50 +92,4 @@ TEST(Helpers, truthyFalse) {
     EXPECT_FALSE(truthy("off"));
     EXPECT_FALSE(truthy(""));
     EXPECT_FALSE(truthy("random"));
-}
-
-// configStringToInt
-
-TEST(Helpers, configStringToIntDecimal) {
-    EXPECT_EQ(configStringToInt("42").value(), 42);
-    EXPECT_EQ(configStringToInt("0").value(), 0);
-    EXPECT_EQ(configStringToInt("-1").value(), -1);
-}
-
-TEST(Helpers, configStringToIntHex) {
-    EXPECT_EQ(configStringToInt("0xFF").value(), 255);
-    EXPECT_EQ(configStringToInt("0x00").value(), 0);
-    EXPECT_EQ(configStringToInt("0x10").value(), 16);
-}
-
-TEST(Helpers, configStringToIntRgba) {
-    auto result = configStringToInt("rgba(255, 0, 0, 1.0)");
-    EXPECT_TRUE(result.has_value());
-}
-
-TEST(Helpers, configStringToIntBooleanStrings) {
-    // "true", "yes", "on" -> 1; "false", "no", "off" -> 0
-    EXPECT_EQ(configStringToInt("true").value(), 1);
-    EXPECT_EQ(configStringToInt("yes").value(), 1);
-    EXPECT_EQ(configStringToInt("on").value(), 1);
-    EXPECT_EQ(configStringToInt("false").value(), 0);
-    EXPECT_EQ(configStringToInt("no").value(), 0);
-    EXPECT_EQ(configStringToInt("off").value(), 0);
-}
-
-TEST(Helpers, configStringToIntInvalid) {
-    EXPECT_FALSE(configStringToInt("").has_value());
-    EXPECT_FALSE(configStringToInt("abc").has_value());
-}
-
-// configStringToVector2D
-
-TEST(Helpers, configStringToVector2DValid) {
-    EXPECT_EQ(configStringToVector2D("1920 1080"), Vector2D(1920, 1080));
-    EXPECT_EQ(configStringToVector2D("0 0"), Vector2D(0, 0));
-}
-
-TEST(Helpers, configStringToVector2DInvalid) {
-    EXPECT_THROW(configStringToVector2D("notvalid"), std::invalid_argument);
-    EXPECT_THROW(configStringToVector2D(""), std::invalid_argument);
 }

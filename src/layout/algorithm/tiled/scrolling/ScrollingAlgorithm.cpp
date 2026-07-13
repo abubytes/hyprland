@@ -7,11 +7,19 @@
 
 #include "../../../../Compositor.hpp"
 #include "../../../../desktop/state/FocusState.hpp"
+#include "../../../../desktop/view/Group.hpp"
 #include "../../../../config/ConfigValue.hpp"
 #include "../../../../config/shared/workspace/WorkspaceRuleManager.hpp"
 #include "../../../../render/Renderer.hpp"
+#include "../../../../state/MonitorState.hpp"
 #include "../../../../managers/input/InputManager.hpp"
+#include "../../../../pointer/PointerManager.hpp"
+#include "../../../../pointer/PointerController.hpp"
+#include "../../../../animation/WorkspaceAnimationController.hpp"
 #include "../../../../event/EventBus.hpp"
+
+#include "../../../../managers/fullscreen/FullscreenController.hpp"
+#include "../../../../layout/algorithm/tiled/scrolling/ScrollingFullscreenHandler.hpp"
 
 #include <hyprutils/string/VarList2.hpp>
 #include <hyprutils/string/VarList.hpp>
@@ -423,31 +431,132 @@ SP<SColumnData> SScrollingData::atCenter() {
 }
 
 void SScrollingData::recalculate(bool forceInstant) {
-    if (!algorithm->m_parent || !algorithm->m_parent->space() || !algorithm->m_parent->space()->workspace() || !algorithm->m_parent->space()->workspace()->m_monitor ||
-        algorithm->m_parent->space()->workspace()->m_hasFullscreenWindow)
+    if (!algorithm->m_parent || !algorithm->m_parent->space() || !algorithm->m_parent->space()->workspace() || !algorithm->m_parent->space()->workspace()->m_monitor)
         return;
 
     static const auto PFSONONE = CConfigValue<Config::INTEGER>("scrolling:fullscreen_on_one_column");
 
+    const auto        WORKSPACE = algorithm->m_parent->space()->workspace();
+    const auto        MONITOR   = WORKSPACE->m_monitor.lock();
+
     const CBox        USABLE   = algorithm->usableArea();
     const auto        WORKAREA = algorithm->m_parent->space()->workArea();
+    const CBox        MONBOX   = MONITOR->logicalBox();
+
+    const auto        WORKSPACERULE = Config::workspaceRuleMgr()->getWorkspaceRuleFor(WORKSPACE);
+    static auto       PGAPSINDATA   = CConfigValue<Config::IComplexConfigValue>("general:gaps_in");
+    auto* const       PGAPSIN       = sc<Config::CCssGapData*>((PGAPSINDATA.ptr()));
+    const auto        GAPSIN        = (WORKSPACERULE && WORKSPACERULE->m_gapsIn.has_value()) ? WORKSPACERULE->m_gapsIn.value() : *PGAPSIN;
+
+    if (const auto FULLSCREEN_WINDOW = Fullscreen::controller()->getFullscreenWindow(WORKSPACE);
+        FULLSCREEN_WINDOW && !Fullscreen::controller()->layoutManagedFS(FULLSCREEN_WINDOW)) {
+        algorithm->m_scrollingFullscreenHandler->setNoMembersAboveFullscreen();
+        return;
+    }
 
     controller->setDirection(algorithm->getDynamicDirection());
 
+    const auto targetBoxWithGaps = [&](const CBox& logical, size_t colIdx, size_t targetIdx, bool fullscreenOrHidden) -> STargetBox {
+        if (fullscreenOrHidden)
+            return {.logicalBox = logical, .visualBox = logical};
+
+        CBox       visual        = logical;
+        const bool PRIMARY_HORIZ = controller->isPrimaryHorizontal();
+
+        const bool COL_NOT_LEFT      = controller->isReversed() ? colIdx + 1 < columns.size() : colIdx > 0;
+        const bool COL_NOT_RIGHT     = controller->isReversed() ? colIdx > 0 : colIdx + 1 < columns.size();
+        const bool TARGET_NOT_TOP    = controller->isReversed() ? targetIdx + 1 < columns[colIdx]->targetDatas.size() : targetIdx > 0;
+        const bool TARGET_NOT_BOTTOM = controller->isReversed() ? targetIdx > 0 : targetIdx + 1 < columns[colIdx]->targetDatas.size();
+
+        const bool GAP_LEFT   = PRIMARY_HORIZ ? COL_NOT_LEFT : TARGET_NOT_TOP;
+        const bool GAP_RIGHT  = PRIMARY_HORIZ ? COL_NOT_RIGHT : TARGET_NOT_BOTTOM;
+        const bool GAP_TOP    = PRIMARY_HORIZ ? TARGET_NOT_TOP : COL_NOT_LEFT;
+        const bool GAP_BOTTOM = PRIMARY_HORIZ ? TARGET_NOT_BOTTOM : COL_NOT_RIGHT;
+
+        const auto GAPOFFSETTOPLEFT     = Vector2D(sc<double>(GAP_LEFT ? GAPSIN.m_left : 0), sc<double>(GAP_TOP ? GAPSIN.m_top : 0));
+        const auto GAPOFFSETBOTTOMRIGHT = Vector2D(sc<double>(GAP_RIGHT ? GAPSIN.m_right : 0), sc<double>(GAP_BOTTOM ? GAPSIN.m_bottom : 0));
+
+        visual.x += GAPOFFSETTOPLEFT.x;
+        visual.y += GAPOFFSETTOPLEFT.y;
+        visual.w = std::max(1.0, visual.w - GAPOFFSETTOPLEFT.x - GAPOFFSETBOTTOMRIGHT.x);
+        visual.h = std::max(1.0, visual.h - GAPOFFSETTOPLEFT.y - GAPOFFSETBOTTOMRIGHT.y);
+
+        return {.logicalBox = logical, .visualBox = visual};
+    };
+
+    bool                     targetWorkspaceHasCoveringFullscreen = false;
+
+    SP<SScrollingTargetData> currentFsTdata = nullptr;
+
     for (size_t i = 0; i < columns.size(); ++i) {
         const auto& COL = columns[i];
+        // Not necessarily covering
+        const bool COL_HAS_FS_TARGET =
+            COL->targetDatas.size() == 1 && COL->targetDatas.at(0)->target && algorithm->m_scrollingFullscreenHandler->isFullscreen(COL->targetDatas.at(0)->target.lock());
 
         for (size_t j = 0; j < COL->targetDatas.size(); ++j) {
-            const auto& TARGET = COL->targetDatas[j];
+            const auto TDATA            = COL->targetDatas[j];
+            const auto TARGET           = TDATA->target.lock();
+            const auto TARGET_WORKSPACE = TARGET ? TARGET->workspace() : nullptr;
+            const auto TARGET_FS_MODE   = algorithm->m_scrollingFullscreenHandler->getFullscreenModes(TDATA->target.lock()).internal;
 
-            TARGET->layoutBox = controller->calculateTargetBox(i, j, USABLE, WORKAREA.pos(), *PFSONONE);
+            if (COL_HAS_FS_TARGET) {
+                if (TARGET_FS_MODE == Fullscreen::FSMODE_FULLSCREEN) {
+                    // Target is Covering Fullscreen
+                    if (algorithm->m_scrollingFullscreenHandler->isFullscreen(TARGET, Fullscreen::FSMODE_FULLSCREEN, true)) {
+                        TDATA->layoutBox                     = MONBOX;
+                        currentFsTdata                       = TDATA;
+                        targetWorkspaceHasCoveringFullscreen = true;
+                    }
+                    // Target is non-covering fullscreen
+                    else {
+                        TDATA->layoutBox = controller->calculateStripBox(i, USABLE, WORKAREA.pos(), *PFSONONE);
+                        if (controller->isPrimaryHorizontal()) {
+                            TDATA->layoutBox.y = MONBOX.y;
+                            TDATA->layoutBox.h = MONBOX.h;
+                        } else {
+                            TDATA->layoutBox.x = MONBOX.x;
+                            TDATA->layoutBox.w = MONBOX.w;
+                        }
+                    }
+                } else if (TARGET_FS_MODE == Fullscreen::FSMODE_MAXIMIZED) {
+                    // Target is Covering Maximised
+                    if (algorithm->m_scrollingFullscreenHandler->isFullscreen(TARGET, Fullscreen::FSMODE_MAXIMIZED, true)) {
+                        TDATA->layoutBox                     = WORKAREA;
+                        currentFsTdata                       = TDATA;
+                        targetWorkspaceHasCoveringFullscreen = true;
+                    }
+                    // Target is non-covering Maximied
+                    else {
+                        TDATA->layoutBox = controller->calculateStripBox(i, USABLE, WORKAREA.pos(), *PFSONONE);
+                        if (controller->isPrimaryHorizontal()) {
+                            TDATA->layoutBox.y = WORKAREA.y;
+                            TDATA->layoutBox.h = WORKAREA.h;
+                        } else {
+                            TDATA->layoutBox.x = WORKAREA.x;
+                            TDATA->layoutBox.w = WORKAREA.w;
+                        }
+                    }
+                }
+                // Target is FS but isn't Maximised or Fullscreen - This shouldn't be possible
+                else
+                    TDATA->layoutBox = CBox{WORKAREA.pos() - Vector2D{100000.0, 100000.0}, Vector2D{1.0, 1.0}};
+            } else
+                TDATA->layoutBox = controller->calculateTargetBox(i, j, USABLE, WORKAREA.pos(), *PFSONONE);
 
-            if (TARGET->target)
-                TARGET->target->setPositionGlobal(TARGET->layoutBox);
-            if (forceInstant && TARGET->target)
-                TARGET->target->warpPositionSize();
+            if (TDATA->target) {
+                if (targetWorkspaceHasCoveringFullscreen)
+                    Fullscreen::controller()->m_windowPosSettingQueued = true;
+                // must set pos of the highest level target (i.e. if target a part of a group, must set that group's pos which will set the pos of all member targets)
+                TDATA->target->setPositionGlobal(targetBoxWithGaps(TDATA->layoutBox, i, j, COL_HAS_FS_TARGET && TARGET_FS_MODE == Fullscreen::FSMODE_FULLSCREEN));
+            }
+
+            if (forceInstant && TDATA->target)
+                TDATA->target->warpPositionSize();
         }
     }
+
+    algorithm->m_scrollingFullscreenHandler->sScrollingDataRecalculateHelper(currentFsTdata, MONITOR, targetWorkspaceHasCoveringFullscreen);
 }
 
 double SScrollingData::maxWidth() {
@@ -468,7 +577,7 @@ bool SScrollingData::visible(SP<SColumnData> c, bool full) {
     return false;
 }
 
-CScrollingAlgorithm::CScrollingAlgorithm() {
+CScrollingAlgorithm::CScrollingAlgorithm() : m_scrollingFullscreenHandler(makeUnique<Fullscreen::ScrollingFullscreenHandler::CScrollingFullscreenHandler>(this)) {
     static const auto PCONFWIDTHS    = CConfigValue<Config::STRING>("scrolling:explicit_column_widths");
     static const auto PCONFDIRECTION = CConfigValue<Config::STRING>("scrolling:direction");
 
@@ -535,7 +644,16 @@ CScrollingAlgorithm::CScrollingAlgorithm() {
         if (!TARGET || TARGET->floating())
             return;
 
-        focusOnInput(TARGET, reason == Desktop::FOCUS_REASON_CLICK ? INPUT_MODE_CLICK : (Desktop::isHardInputFocusReason(reason) ? INPUT_MODE_KB : INPUT_MODE_SOFT));
+        // if follow_focus != 0, focuswindow always moves scrolling view
+        // if follow_focus != 0, change in a group's current window state always moves scrolling view
+        // if follow_focus != 0, moving a window into group via the corresponding dispatches `moveintogroup`, `movewindoworgroup` always moves scrolling view
+        // if follow_focus != 0, moving focus via dispatches that cause switching to a specific window via calling switchToWindow(), such as movefocus, cyclenext, focuscurrentor(last/urgent); always moves scrolling view
+        if (*PFOLLOW_FOCUS &&
+            (reason == Desktop::FOCUS_REASON_DISPATCH_FOCUSWINDOW || reason == Desktop::FOCUS_REASON_GROUP_CURRENT_WINDOW_CHANGE ||
+             reason == Desktop::FOCUS_REASON_DISPATCH_MOVEWINDOWINTOGROUP || reason == Desktop::FOCUS_REASON_SWITCH_TO_WINDOW_SOFT))
+            focusOnInput(TARGET, INPUT_MODE_HARD);
+        else
+            focusOnInput(TARGET, reason == Desktop::FOCUS_REASON_CLICK ? INPUT_MODE_CLICK : (Desktop::isHardInputFocusReason(reason) ? INPUT_MODE_HARD : INPUT_MODE_SOFT));
     });
 
     // Initialize default widths and direction
@@ -575,8 +693,12 @@ void CScrollingAlgorithm::focusOnInput(SP<ITarget> target, eInputMode input) {
             return;
     }
 
+    // if click, but target is not under cursor, ignore
+    if (input == INPUT_MODE_CLICK && !Pointer::mgr()->getCursorBoxGlobal().overlaps(target->position()))
+        return;
+
     // if we moved via non-kb, and it's fully visible, ignore
-    if (m_scrollingData->visible(TARGETDATA->column.lock(), true) && input != INPUT_MODE_KB)
+    if (m_scrollingData->visible(TARGETDATA->column.lock(), true) && input != INPUT_MODE_HARD)
         return;
 
     static const auto PFITMETHOD = CConfigValue<Config::INTEGER>("scrolling:focus_fit_method");
@@ -591,7 +713,7 @@ void CScrollingAlgorithm::newTarget(SP<ITarget> target) {
     auto droppingOn = Desktop::focusState()->window();
 
     if (droppingOn && droppingOn->layoutTarget() == target)
-        droppingOn = g_pCompositor->vectorToWindowUnified(g_pInputManager->getMouseCoordsInternal(), Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS);
+        droppingOn = Desktop::viewState()->hitTest().windowAt(g_pInputManager->getMouseCoordsInternal(), Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS);
 
     SP<SScrollingTargetData> droppingData   = droppingOn ? dataFor(droppingOn->layoutTarget()) : nullptr;
     SP<SColumnData>          droppingColumn = droppingData ? droppingData->column.lock() : nullptr;
@@ -603,12 +725,41 @@ void CScrollingAlgorithm::newTarget(SP<ITarget> target) {
         m_scrollingData->fitCol(col);
     } else {
         if (g_layoutManager->dragController()->wasDraggingWindow() && g_layoutManager->dragController()->draggingTiled()) {
-            if (droppingOn) {
-                const auto IDX = droppingColumn->idx(droppingOn->layoutTarget());
-                const auto TOP = droppingOn->getWindowIdealBoundingBoxIgnoreReserved().middle().y > g_pInputManager->getMouseCoordsInternal().y;
-                droppingColumn->add(target, TOP ? (IDX == 0 ? -1 : IDX - 1) : (IDX));
-            } else
+            // we are dropping a DnD on a different target.
+            // for scrolling, if we are close to the edge (30%, because I said so)
+            // make a new column, otherwise add.
+
+            const auto     MOUSE_POS    = g_pInputManager->getMouseCoordsInternal();
+            const auto     DROPPING_BOX = *droppingOn->logicalBox();
+
+            const auto     MOUSE_CMP_AXIS = m_scrollingData->controller->isPrimaryHorizontal() ? MOUSE_POS.x : MOUSE_POS.y;
+            const Vector2D DROPPING_RANGE =
+                m_scrollingData->controller->isPrimaryHorizontal() ? Vector2D{DROPPING_BOX.x, DROPPING_BOX.w} : Vector2D{DROPPING_BOX.y, DROPPING_BOX.h};
+
+            const float RANGE_THRESHOLD   = 0.3;
+            const bool  WITHIN_RANGE_LEFT = MOUSE_CMP_AXIS <= DROPPING_RANGE.x + (DROPPING_RANGE.y * RANGE_THRESHOLD);
+            const bool  WITHIN_RANGE      = WITHIN_RANGE_LEFT || MOUSE_CMP_AXIS >= DROPPING_RANGE.x + (DROPPING_RANGE.y * (1.F - RANGE_THRESHOLD));
+
+            if (!WITHIN_RANGE) {
+                // we are not within edge range, so we drop into the column
+
+                if (droppingOn) {
+                    const auto IDX = droppingColumn->idx(droppingOn->layoutTarget());
+                    const auto TOP = droppingOn->getWindowIdealBoundingBoxIgnoreReserved().middle().y > g_pInputManager->getMouseCoordsInternal().y;
+                    droppingColumn->add(target, TOP ? (IDX == 0 ? -1 : IDX - 1) : (IDX));
+                } else
+                    droppingColumn->add(target);
+            } else {
+                // we are within the edge drop, make a new column
+
+                if (WITHIN_RANGE_LEFT)
+                    droppingColumn = m_scrollingData->add(m_scrollingData->idx(droppingColumn) - 1);
+                else
+                    droppingColumn = m_scrollingData->add(m_scrollingData->idx(droppingColumn));
+
                 droppingColumn->add(target);
+            }
+
             m_scrollingData->fitCol(droppingColumn);
         } else {
             auto idx = m_scrollingData->idx(droppingColumn);
@@ -630,6 +781,10 @@ void CScrollingAlgorithm::removeTarget(SP<ITarget> target) {
 
     if (!DATA)
         return;
+
+    // remove the FS state of a tiled window when it is being removed/floated -- This exception needs to exist for the float case as it's default handled
+    if (m_scrollingFullscreenHandler->isFullscreen(target))
+        Fullscreen::controller()->setFullscreenMode(target->window(), Fullscreen::FSMODE_NONE);
 
     if (!m_scrollingData->next(DATA->column.lock()) && DATA->column->targetDatas.size() <= 1) {
         // move the view if this is the last column
@@ -698,7 +853,7 @@ void CScrollingAlgorithm::resizeTarget(const Vector2D& delta, SP<ITarget> target
     // set the offset because we'll prevent centering during a drag
     m_scrollingData->controller->setOffset(cameraOffset);
 
-    const bool RESIZING_LEFT = isPrimaryHoriz ? corner == CORNER_BOTTOMLEFT || corner == CORNER_TOPLEFT : corner == CORNER_TOPLEFT || corner == CORNER_TOPRIGHT;
+    const bool RESIZING_LEFT = isPrimaryHoriz ? edgeLeft(corner) : edgeTop(corner);
 
     if (RESIZING_LEFT) {
         // resize from left edge (inner edge) - grow/shrink column width and adjust offset to keep RIGHT edge stationary
@@ -753,50 +908,33 @@ void CScrollingAlgorithm::resizeTarget(const Vector2D& delta, SP<ITarget> target
             }
         }
 
-        switch (corner) {
-            case CORNER_BOTTOMLEFT:
-            case CORNER_BOTTOMRIGHT: {
-                if (!NEXT_TD)
-                    break;
+        if (edgeBottom(corner) && NEXT_TD) {
+            float nextSize = CURR_COLUMN->getTargetSize(NEXT_TD);
+            float currSize = CURR_COLUMN->getTargetSize(CURR_TD);
 
-                float nextSize = CURR_COLUMN->getTargetSize(NEXT_TD);
-                float currSize = CURR_COLUMN->getTargetSize(CURR_TD);
-
-                if (nextSize <= MIN_ROW_HEIGHT && delta.y >= 0)
-                    break;
-
+            if (!(nextSize <= MIN_ROW_HEIGHT && delta.y >= 0)) {
                 float adjust = std::clamp((float)(delta.y / USABLE.h), (-currSize + MIN_ROW_HEIGHT), (nextSize - MIN_ROW_HEIGHT));
 
                 CURR_COLUMN->setTargetSize(NEXT_TD, std::clamp(nextSize - adjust, MIN_ROW_HEIGHT, MAX_ROW_HEIGHT));
                 CURR_COLUMN->setTargetSize(CURR_TD, std::clamp(currSize + adjust, MIN_ROW_HEIGHT, MAX_ROW_HEIGHT));
-                break;
             }
-            case CORNER_TOPLEFT:
-            case CORNER_TOPRIGHT: {
-                if (!PREV_TD)
-                    break;
+        } else if (edgeTop(corner) && PREV_TD) {
+            float prevSize = CURR_COLUMN->getTargetSize(PREV_TD);
+            float currSize = CURR_COLUMN->getTargetSize(CURR_TD);
 
-                float prevSize = CURR_COLUMN->getTargetSize(PREV_TD);
-                float currSize = CURR_COLUMN->getTargetSize(CURR_TD);
-
-                if ((prevSize <= MIN_ROW_HEIGHT && modDelta.y <= 0) || (currSize <= MIN_ROW_HEIGHT && delta.y >= 0))
-                    break;
-
+            if (!((prevSize <= MIN_ROW_HEIGHT && modDelta.y <= 0) || (currSize <= MIN_ROW_HEIGHT && delta.y >= 0))) {
                 float adjust = std::clamp((float)(modDelta.y / USABLE.h), -(prevSize - MIN_ROW_HEIGHT), (currSize - MIN_ROW_HEIGHT));
 
                 CURR_COLUMN->setTargetSize(PREV_TD, std::clamp(prevSize + adjust, MIN_ROW_HEIGHT, MAX_ROW_HEIGHT));
                 CURR_COLUMN->setTargetSize(CURR_TD, std::clamp(currSize - adjust, MIN_ROW_HEIGHT, MAX_ROW_HEIGHT));
-                break;
             }
-
-            default: break;
         }
     }
 
     m_scrollingData->recalculate(true);
 }
 
-void CScrollingAlgorithm::recalculate() {
+void CScrollingAlgorithm::recalculate(eRecalculateReason reason) {
     // guard against recalculation during transitional monitor states
     // (e.g. monitor reconnecting after suspend where workspace/monitor may not be ready)
     if (!m_parent || !m_parent->space() || !m_parent->space()->workspace() || !m_parent->space()->workspace()->m_monitor)
@@ -807,11 +945,24 @@ void CScrollingAlgorithm::recalculate() {
 
         const auto TARGETDATA = dataFor(TARGET);
 
-        if (TARGETDATA && !m_scrollingData->visible(TARGETDATA->column.lock(), true))
-            focusOnInput(Desktop::focusState()->window()->layoutTarget(), INPUT_MODE_KB);
+        if (TARGETDATA && !m_scrollingData->visible(TARGETDATA->column.lock(), true)) {
+
+            /* guard against unwanted scrolling viewport moves - If recalculate() was called, it is assumed that either the INPUT_MODE will be HARD (i.e. it is meant to move the scrolling viewport) or
+            it is not meant to move the scrolling viewport.
+            (e.g. changing workspace to a scrolling layout workspace fits the focused window in that workspace into view) */
+            if (Layout::isHardRecalculateReason(reason))
+                focusOnInput(Desktop::focusState()->window()->layoutTarget(), INPUT_MODE_HARD);
+        }
     }
 
     m_scrollingData->recalculate();
+}
+
+void CScrollingAlgorithm::expelTarget(SP<SScrollingTargetData> tdata, SP<SColumnData> srcCol, std::optional<int64_t> insertIdx) {
+    auto col = !insertIdx ? m_scrollingData->add() : m_scrollingData->add(*insertIdx);
+    srcCol->remove(tdata->target.lock());
+    col->add(tdata);
+    m_scrollingData->centerOrFitCol(col);
 }
 
 SP<SScrollingTargetData> CScrollingAlgorithm::closestNode(const Vector2D& posGlobglobgabgalab) {
@@ -970,7 +1121,7 @@ void CScrollingAlgorithm::moveTargetTo(SP<ITarget> t, Math::eDirection dir, bool
         if (!*PMONITORFALLBACK)
             return; // noop
 
-        const auto MONINDIR = g_pCompositor->getMonitorInDirection(m_parent->space()->workspace()->m_monitor.lock(), dir);
+        const auto MONINDIR = State::monitorState()->query().relativeTo(m_parent->space()->workspace()->m_monitor.lock()).inDirection(dir).run();
         if (MONINDIR && MONINDIR != m_parent->space()->workspace()->m_monitor && MONINDIR->m_activeWorkspace) {
             t->assignToSpace(MONINDIR->m_activeWorkspace->m_space, focalPointForDir(t, dir));
 
@@ -982,6 +1133,10 @@ void CScrollingAlgorithm::moveTargetTo(SP<ITarget> t, Math::eDirection dir, bool
 
     m_scrollingData->recalculate();
     focusTargetUpdate(t);
+}
+
+WP<Fullscreen::IFullscreenHandler> CScrollingAlgorithm::getFSHandler() {
+    return m_scrollingFullscreenHandler;
 }
 
 Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
@@ -1020,7 +1175,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
 
             focusTargetUpdate(COL->targetDatas.front()->target.lock());
             if (COL->targetDatas.front()->target->window())
-                g_pCompositor->warpCursorTo(COL->targetDatas.front()->target->window()->middle());
+                Pointer::pointerController()->warpTo(COL->targetDatas.front()->target->window()->middle());
 
             return {};
         } else if (ARGS[1] == "-col") {
@@ -1031,7 +1186,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
                     m_scrollingData->recalculate();
                     focusTargetUpdate((m_scrollingData->columns.back()->targetDatas.back())->target.lock());
                     if (m_scrollingData->columns.back()->targetDatas.back()->target->window())
-                        g_pCompositor->warpCursorTo((m_scrollingData->columns.back()->targetDatas.back())->target->window()->middle());
+                        Pointer::pointerController()->warpTo((m_scrollingData->columns.back()->targetDatas.back())->target->window()->middle());
                 }
 
                 return {};
@@ -1046,7 +1201,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
 
             focusTargetUpdate(COL->targetDatas.back()->target.lock());
             if (COL->targetDatas.front()->target->window())
-                g_pCompositor->warpCursorTo(COL->targetDatas.front()->target->window()->middle());
+                Pointer::pointerController()->warpTo(COL->targetDatas.front()->target->window()->middle());
 
             return {};
         }
@@ -1171,6 +1326,26 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
 
             m_scrollingData->controller->setOffset(off);
             m_scrollingData->recalculate();
+        } else if (ARGS[1] == "expand") {
+            // fit active column to take up as much space as it can without pushing others offscreen
+            auto            w = 0.0;
+            SP<SColumnData> USED_COL;
+            for (const auto& COL : m_scrollingData->columns) {
+                if (COL != WDATA->column && m_scrollingData->visible(COL))
+                    w += COL->getColumnWidth();
+                else
+                    USED_COL = COL;
+            }
+
+            float rem = std::clamp(1.f - (float)w, 0.f, 1.f);
+            if (rem != WDATA->column->getColumnWidth()) {
+                WDATA->column->setColumnWidth(rem);
+
+                m_scrollingData->controller->setOffset(0);
+                centerOrFit(USED_COL);
+                m_scrollingData->recalculate();
+            }
+
         } else if (ARGS[1] == "all") {
             // fit all columns on screen
             const size_t LEN = m_scrollingData->columns.size();
@@ -1304,7 +1479,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
 
             focusTargetUpdate(PREV->target.lock());
             if (PREV->target->window())
-                g_pCompositor->warpCursorTo(PREV->target->window()->middle());
+                Pointer::pointerController()->warpTo(PREV->target->window()->middle());
         } else if (isNextInStrip) {
             // Move to next target within current strip
             auto NEXT = TDATA->column->next(TDATA);
@@ -1317,7 +1492,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
 
             focusTargetUpdate(NEXT->target.lock());
             if (NEXT->target->window())
-                g_pCompositor->warpCursorTo(NEXT->target->window()->middle());
+                Pointer::pointerController()->warpTo(NEXT->target->window()->middle());
         } else if (isPrevStrip) {
             // Move to previous strip
             auto PREV = m_scrollingData->prev(TDATA->column.lock());
@@ -1326,7 +1501,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
                     centerOrFit(TDATA->column.lock());
                     m_scrollingData->recalculate();
                     if (TDATA->target->window())
-                        g_pCompositor->warpCursorTo(TDATA->target->window()->middle());
+                        Pointer::pointerController()->warpTo(TDATA->target->window()->middle());
                     return {};
                 } else
                     PREV = (*PCONFWRAPFOCUS == 1) ? m_scrollingData->columns.back() : m_scrollingData->columns.front();
@@ -1338,7 +1513,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
                 centerOrFit(PREV);
                 m_scrollingData->recalculate();
                 if (pTargetData->target->window())
-                    g_pCompositor->warpCursorTo(pTargetData->target->window()->middle());
+                    Pointer::pointerController()->warpTo(pTargetData->target->window()->middle());
             }
         } else if (isNextStrip) {
             // Move to next strip
@@ -1348,7 +1523,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
                     centerOrFit(TDATA->column.lock());
                     m_scrollingData->recalculate();
                     if (TDATA->target->window())
-                        g_pCompositor->warpCursorTo(TDATA->target->window()->middle());
+                        Pointer::pointerController()->warpTo(TDATA->target->window()->middle());
                     return {};
                 } else
                     NEXT = (*PCONFWRAPFOCUS == 1) ? m_scrollingData->columns.front() : m_scrollingData->columns.back();
@@ -1360,7 +1535,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
                 centerOrFit(NEXT);
                 m_scrollingData->recalculate();
                 if (pTargetData->target->window())
-                    g_pCompositor->warpCursorTo(pTargetData->target->window()->middle());
+                    Pointer::pointerController()->warpTo(pTargetData->target->window()->middle());
             }
         }
     } else if (ARGS[0] == "promote" || ARGS[0] == "consume" || ARGS[0] == "expel" || ARGS[0] == "consume_or_expel") {
@@ -1371,14 +1546,6 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
         const auto CURRENT_COL = TDATA->column.lock();
         if (!CURRENT_COL)
             return stateErr("no current col");
-
-        // expel a target from srcCol into its own new column at insertIdx
-        auto expelTarget = [&](SP<SScrollingTargetData> tdata, SP<SColumnData> srcCol, std::optional<int64_t> insertIdx) {
-            auto col = !insertIdx ? m_scrollingData->add() : m_scrollingData->add(*insertIdx);
-            srcCol->remove(tdata->target.lock());
-            col->add(tdata);
-            m_scrollingData->centerOrFitCol(col);
-        };
 
         // consume the first target from adjCol into dstCol
         auto consumeTarget = [&](SP<SColumnData> dstCol, SP<SColumnData> adjCol) {
@@ -1491,10 +1658,197 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
 
         m_scrollingData->centerCol(CURRENT_COL);
         m_scrollingData->recalculate();
-    } else
+    } else if (ARGS[0] == "inhibit_scroll") {
+        // Inhibits/Uninhibits scrolling: The tape does not move for the currently active workspace while this option is active
+
+        if (ARGS.size() > 2)
+            return invalidArg("too many args");
+
+        // Toggle
+        if (ARGS.size() == 1)
+            m_scrollingData->controller->getScrollInhibitor().isInhibited ? uninhibitScroll() : inhibitScroll();
+        // Explicit Disable
+        else if (ARGS[1] == "0" || ARGS[1] == "false")
+            uninhibitScroll();
+        // Explicit Enable
+        else
+            inhibitScroll();
+    } else if (ARGS[0] == "fit_into_view") {
+        // makes the currently active column complately visible
+
+        const auto PWINDOW = Desktop::focusState()->window();
+
+        if (!PWINDOW)
+            return noTarget("no focused window");
+
+        const auto WDATA = dataFor(PWINDOW->layoutTarget());
+
+        if (!WDATA || m_scrollingData->columns.size() == 0)
+            return stateErr("can't fit: no window or columns");
+
+        m_scrollingData->SScrollingData::centerOrFitCol(WDATA->column.lock());
+        m_scrollingData->recalculate();
+    }
+
+    else
         return invalidArg("no such layoutmsg for scrolling");
 
     return {};
+}
+
+void CScrollingAlgorithm::moveTape(float delta) {
+    if (delta == 0.F)
+        return;
+
+    m_scrollingData->controller->adjustOffset(-delta);
+    m_scrollingData->recalculate();
+}
+
+void CScrollingAlgorithm::moveTapeNormalized(double delta) {
+    const double primary = primaryViewportSize();
+    if (primary <= 0.0 || delta == 0.0)
+        return;
+
+    moveTape(delta * primary);
+}
+
+void CScrollingAlgorithm::snapToGrid() {
+    snapToProjectedOffset(normalizedTapeOffset());
+}
+
+SP<SColumnData> CScrollingAlgorithm::snapToProjectedOffset(double projectedNormalizedOffset) {
+    static const auto PFSONONE   = CConfigValue<Config::INTEGER>("scrolling:fullscreen_on_one_column");
+    static const auto PFITMETHOD = CConfigValue<Config::INTEGER>("scrolling:focus_fit_method");
+
+    const auto        USABLE     = usableArea();
+    auto&             controller = *m_scrollingData->controller;
+
+    if (controller.stripCount() == 0)
+        return nullptr;
+
+    const double usablePrimary = controller.isPrimaryHorizontal() ? USABLE.w : USABLE.h;
+    if (usablePrimary <= 0.0)
+        return nullptr;
+
+    const double maxExtent = controller.calculateMaxExtent(USABLE, *PFSONONE);
+    if (maxExtent <= 0.0)
+        return nullptr;
+
+    const double projectedOffset = projectedNormalizedOffset * usablePrimary;
+
+    double       bestOffset      = 0.0;
+    double       bestDelta       = 0.0;
+    double       bestCenterDelta = 0.0;
+    size_t       bestIndex       = 0;
+    bool         foundSnap       = false;
+
+    auto         centerOffsetFor = [&](size_t index) {
+        const double start = controller.calculateStripStart(index, USABLE, *PFSONONE);
+        const double size  = controller.calculateStripSize(index, USABLE, *PFSONONE);
+
+        return start - (usablePrimary - size) / 2.0;
+    };
+
+    auto fitOffsetFor = [&](size_t index) {
+        const double start = controller.calculateStripStart(index, USABLE, *PFSONONE);
+        const double size  = controller.calculateStripSize(index, USABLE, *PFSONONE);
+        const double lo    = start - usablePrimary + size;
+        const double hi    = start;
+
+        if (lo > hi)
+            return centerOffsetFor(index);
+
+        const double center = centerOffsetFor(index);
+        const double edge   = projectedOffset < center ? lo : hi;
+
+        return std::abs(projectedOffset - center) <= std::abs(projectedOffset - edge) ? center : edge;
+    };
+
+    auto considerColumn = [&](size_t index) {
+        const double offset         = *PFITMETHOD == 1 ? fitOffsetFor(index) : centerOffsetFor(index);
+        const double delta          = std::abs(offset - projectedOffset);
+        const double start          = controller.calculateStripStart(index, USABLE, *PFSONONE);
+        const double size           = controller.calculateStripSize(index, USABLE, *PFSONONE);
+        const double centerDelta    = std::abs((start + size / 2.0) - (projectedOffset + usablePrimary / 2.0));
+        const bool   betterFit      = delta < bestDelta;
+        const bool   betterTieBreak = delta == bestDelta && centerDelta < bestCenterDelta;
+
+        if (!foundSnap || betterFit || betterTieBreak) {
+            bestOffset      = offset;
+            bestDelta       = delta;
+            bestCenterDelta = centerDelta;
+            bestIndex       = index;
+            foundSnap       = true;
+        }
+    };
+
+    for (size_t i = 0; i < controller.stripCount(); ++i)
+        considerColumn(i);
+
+    if (!foundSnap)
+        return nullptr;
+
+    controller.setOffset(bestOffset);
+    m_scrollingData->recalculate();
+
+    if (bestIndex < m_scrollingData->columns.size())
+        return m_scrollingData->columns[bestIndex];
+
+    return nullptr;
+}
+
+void CScrollingAlgorithm::focusColumn(SP<SColumnData> column) {
+    if (!column || column->targetDatas.empty()) {
+        focusTargetUpdate(nullptr);
+        return;
+    }
+
+    auto targetData = column->lastFocusedTarget.lock();
+
+    if (!targetData || targetData->column.lock() != column || !targetData->target || !Desktop::View::validMapped(targetData->target->window())) {
+        targetData = nullptr;
+
+        for (const auto& candidate : column->targetDatas) {
+            if (candidate->target && Desktop::View::validMapped(candidate->target->window())) {
+                targetData = candidate;
+                break;
+            }
+        }
+    }
+
+    focusTargetUpdate(targetData ? targetData->target.lock() : nullptr);
+}
+
+SP<SColumnData> CScrollingAlgorithm::getColumnAtViewportCenter() {
+    return m_scrollingData ? m_scrollingData->atCenter() : nullptr;
+}
+
+SP<SColumnData> CScrollingAlgorithm::currentColumn() {
+    auto focus = Desktop::focusState()->window();
+
+    if (!focus)
+        return nullptr;
+
+    auto data = dataFor(focus->layoutTarget());
+
+    if (!data)
+        return nullptr;
+
+    return data->column.lock();
+}
+
+double CScrollingAlgorithm::primaryViewportSize() {
+    const auto USABLE = usableArea();
+
+    return m_scrollingData->controller->isPrimaryHorizontal() ? USABLE.w : USABLE.h;
+}
+
+double CScrollingAlgorithm::normalizedTapeOffset() {
+    const double primary = primaryViewportSize();
+    if (primary <= 0.0)
+        return 0.0;
+
+    return m_scrollingData->controller->getOffset() / primary;
 }
 
 std::optional<Vector2D> CScrollingAlgorithm::predictSizeForNewTarget() {
@@ -1546,17 +1900,36 @@ SP<SScrollingTargetData> CScrollingAlgorithm::findBestNeighbor(SP<SScrollingTarg
     return nullptr;
 }
 
-SP<SScrollingTargetData> CScrollingAlgorithm::dataFor(SP<ITarget> t) {
+SP<SScrollingTargetData> CScrollingAlgorithm::dataFor(SP<ITarget> t, bool stepIntoGroups) const {
     if (!t)
         return nullptr;
 
-    for (const auto& c : m_scrollingData->columns) {
-        for (const auto& d : c->targetDatas) {
-            if (d->target == t)
-                return d;
+    for (const auto& COL : m_scrollingData->columns) {
+        for (const auto& SCROLLING_DATA : COL->targetDatas) {
+
+            const auto TARGET = SCROLLING_DATA->target.lock();
+
+            if (stepIntoGroups) {
+                if (!SCROLLING_DATA->target)
+                    continue;
+
+                // if tracked target data is a group, search the contents of the group for the target
+                if (TARGET->type() == TARGET_TYPE_GROUP && TARGET->window()) {
+                    const auto WINDOW_GROUP = TARGET->window()->m_group;
+                    if (WINDOW_GROUP) {
+                        for (const auto& window : WINDOW_GROUP->windows()) {
+                            if (window->m_target == t)
+                                return SCROLLING_DATA;
+                        }
+                    }
+                } else if (TARGET == t)
+                    return SCROLLING_DATA;
+            } else {
+                if (TARGET == t)
+                    return SCROLLING_DATA;
+            }
         }
     }
-
     return nullptr;
 }
 
@@ -1584,7 +1957,7 @@ eScrollDirection CScrollingAlgorithm::getDynamicDirection() {
         return SCROLL_DIR_RIGHT; // default
 }
 
-CBox CScrollingAlgorithm::usableArea() {
+CBox CScrollingAlgorithm::usableArea() const {
     if (!m_parent || !m_parent->space())
         return {};
 
@@ -1602,6 +1975,20 @@ CBox CScrollingAlgorithm::usableArea() {
     box.h = std::max(box.h, 1.0);
 
     return box;
+}
+
+void CScrollingAlgorithm::inhibitScroll() {
+
+    m_scrollingData->controller->getScrollInhibitor().offsetWhenInhibited = m_scrollingData->controller->getOffset();
+    m_scrollingData->controller->getScrollInhibitor().isInhibited         = true;
+
+    Log::logger->log(Log::INFO, "Scrolling inhibited");
+}
+
+void CScrollingAlgorithm::uninhibitScroll() {
+    m_scrollingData->controller->getScrollInhibitor().isInhibited = false;
+
+    Log::logger->log(Log::INFO, "Scrolling uninhibited");
 }
 
 float CScrollingAlgorithm::defaultColumnWidth() {

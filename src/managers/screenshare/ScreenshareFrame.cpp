@@ -1,5 +1,5 @@
 #include "ScreenshareManager.hpp"
-#include "../PointerManager.hpp"
+#include "../../pointer/PointerManager.hpp"
 #include "../input/InputManager.hpp"
 #include "../permissions/DynamicPermissionManager.hpp"
 #include "../../protocols/ColorManagement.hpp"
@@ -7,12 +7,14 @@
 #include "../../Compositor.hpp"
 #include "../../render/Renderer.hpp"
 #include "../../render/OpenGL.hpp"
-#include "../../helpers/Monitor.hpp"
+#include "../../output/Monitor.hpp"
+#include "../../state/MonitorState.hpp"
 #include "../../desktop/view/Window.hpp"
 #include "../../desktop/state/FocusState.hpp"
 #include "../../render/pass/ClearPassElement.hpp"
 #include "../../render/pass/RectPassElement.hpp"
 #include "helpers/cm/ColorManagement.hpp"
+#include "../../managers/fullscreen/FullscreenController.hpp"
 #include <hyprutils/math/Region.hpp>
 #include <hyprgraphics/egl/Egl.hpp>
 
@@ -72,8 +74,11 @@ CScreenshareFrame::~CScreenshareFrame() {
     if (m_failed || !m_shared)
         return;
 
-    if (!m_copied && m_callback)
-        m_callback(RESULT_NOT_COPIED);
+    if (!m_copied && m_callback) {
+        FScreenshareCallback cb;
+        std::swap(cb, m_callback);
+        cb(RESULT_NOT_COPIED);
+    }
 }
 
 bool CScreenshareFrame::done() const {
@@ -121,7 +126,7 @@ eScreenshareError CScreenshareFrame::share(SP<IHLBuffer> buffer, const CRegion& 
     if UNLIKELY (done())
         return ERROR_STOPPED;
 
-    if UNLIKELY (!m_session->monitor() || !g_pCompositor->monitorExists(m_session->monitor())) {
+    if UNLIKELY (!m_session->monitor() || !State::monitorState()->contains(m_session->monitor())) {
         LOGM(Log::ERR, "Client requested sharing of a monitor that is gone");
         m_failed = true;
         return ERROR_STOPPED;
@@ -168,10 +173,18 @@ eScreenshareError CScreenshareFrame::share(SP<IHLBuffer> buffer, const CRegion& 
     m_callback = callback;
     m_shared   = true;
 
+    if (m_session->m_type == SHARE_MONITOR || m_session->m_type == SHARE_REGION) {
+        const auto PMONITOR = m_session->monitor();
+        if (PMONITOR)
+            PMONITOR->addDamage(PMONITOR->resources()->pendingMirrorFBDamage());
+    }
+
     // schedule a frame so that when a screenshare starts it isn't black until the output is updated
     if (m_isFirst) {
-        g_pCompositor->scheduleFrameForMonitor(m_session->monitor(), Aquamarine::IOutput::AQ_SCHEDULE_NEEDS_FRAME);
-        g_pHyprRenderer->damageMonitor(m_session->monitor());
+        const auto PMONITOR = m_session->monitor();
+        if (PMONITOR)
+            PMONITOR->scheduleFrame(Aquamarine::IOutput::AQ_SCHEDULE_NEEDS_FRAME);
+        g_pHyprRenderer->damageMonitor(PMONITOR);
     }
 
     // TODO: add a damage ring for output damage since last shared frame
@@ -244,7 +257,7 @@ bool CScreenshareFrame::hasNoScreenShareOverlays(PHLMONITOR pMonitor) {
     if (!pMonitor)
         return false;
 
-    for (auto const& l : g_pCompositor->m_layers) {
+    for (auto const& l : Desktop::layerState()->layers()) {
         if (!l->m_ruleApplicator->noScreenShare().valueOrDefault())
             continue;
 
@@ -259,7 +272,7 @@ bool CScreenshareFrame::hasNoScreenShareOverlays(PHLMONITOR pMonitor) {
             return true;
     }
 
-    for (auto const& w : g_pCompositor->m_windows) {
+    for (auto const& w : Desktop::windowState()->windows()) {
         if (!shouldMaskNoScreenShareWindow(w, pMonitor))
             continue;
 
@@ -312,7 +325,7 @@ void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
         };
     };
 
-    for (auto const& l : g_pCompositor->m_layers) {
+    for (auto const& l : Desktop::layerState()->layers()) {
         if (!l->m_ruleApplicator->noScreenShare().valueOrDefault())
             continue;
 
@@ -333,13 +346,13 @@ void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
             l->m_popupHead->breadthfirst(hidePopups(popupBaseOffset), nullptr);
     }
 
-    for (auto const& w : g_pCompositor->m_windows) {
+    for (auto const& w : Desktop::windowState()->windows()) {
         if (!shouldMaskNoScreenShareWindow(w, pMonitor))
             continue;
 
         const auto PWORKSPACE = w->m_workspace;
 
-        if UNLIKELY (!PWORKSPACE && !w->m_fadingOut && w->alphaValue(WINDOW_ALPHA_FADE) * w->alphaValue(WINDOW_ALPHA_FULLSCREEN) != 0.f)
+        if UNLIKELY (!PWORKSPACE && w->alphaValue(WINDOW_ALPHA_FADE) * w->alphaValue(WINDOW_ALPHA_FULLSCREEN) != 0.f)
             continue;
 
         const auto renderOffset     = PWORKSPACE && !w->m_pinned ? PWORKSPACE->m_renderOffset->value() : Vector2D{};
@@ -348,7 +361,7 @@ void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
                                                                  CBox{REALPOS.x, REALPOS.y, std::max(w->m_realSize->value().x, 5.0), std::max(w->m_realSize->value().y, 5.0)});
 
         // Rounding can leak pixels when a region capture shifts the mask relative to the output.
-        const auto dontRound     = m_session->m_captureBox.pos() != Vector2D() || w->isEffectiveInternalFSMode(FSMODE_FULLSCREEN);
+        const auto dontRound     = m_session->m_captureBox.pos() != Vector2D() || Fullscreen::controller()->isFullscreen(w, Fullscreen::FSMODE_FULLSCREEN);
         const auto rounding      = dontRound ? 0 : w->rounding() * pMonitor->m_scale;
         const auto roundingPower = dontRound ? 2.0f : w->roundingPower();
 
@@ -375,7 +388,7 @@ void CScreenshareFrame::renderOverlayCursor(PHLMONITOR pMonitor) {
 
     CRegion  fakeDamage = {0, 0, INT16_MAX, INT16_MAX};
     Vector2D cursorPos  = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position - m_session->m_captureBox.pos() / pMonitor->m_scale;
-    g_pPointerManager->renderSoftwareCursorsFor(pMonitor, Time::steadyNow(), fakeDamage, cursorPos, true);
+    Pointer::mgr()->renderSoftwareCursorsFor(pMonitor, Time::steadyNow(), fakeDamage, cursorPos, true);
 }
 
 void CScreenshareFrame::renderMonitor() {
@@ -498,7 +511,7 @@ void CScreenshareFrame::renderWindow() {
         return;
 
     CRegion fakeDamage = {0, 0, INT16_MAX, INT16_MAX};
-    g_pPointerManager->renderSoftwareCursorsFor(PMONITOR->m_self.lock(), NOW, fakeDamage, g_pInputManager->getMouseCoordsInternal() - PWINDOW->m_realPosition->value(), true);
+    Pointer::mgr()->renderSoftwareCursorsFor(PMONITOR->m_self.lock(), NOW, fakeDamage, g_pInputManager->getMouseCoordsInternal() - PWINDOW->m_realPosition->value(), true);
 }
 
 void CScreenshareFrame::render() {
@@ -619,17 +632,21 @@ bool CScreenshareFrame::copyShm() {
     g_pHyprRenderer->endRender();
     g_pHyprRenderer->m_screencopyDebugActive = OLDDEBUG;
 
-    bool copied = true;
+    bool readSucceeded = true;
     m_damage.forEachRect([&](const auto& rect) {
+        if (!readSucceeded)
+            return;
+
         int width  = rect.x2 - rect.x1;
         int height = rect.y2 - rect.y1;
         LOGM(Log::TRACE, "[SSDBG] copyShm readPixels mon={} rect={} {} {} {}", PMONITOR ? PMONITOR->m_name : "<none>", rect.x1, rect.y1, width, height);
-        copied = outFB->readPixels(m_buffer, rect.x1, rect.y1, width, height) && copied;
+        if (!outFB->readPixels(m_buffer, rect.x1, rect.y1, width, height))
+            readSucceeded = false;
     });
 
     g_pHyprRenderer->m_renderData.pMonitor.reset();
 
-    if (!copied) {
+    if (!readSucceeded) {
         LOGM(Log::ERR, "Can't copy: failed to read pixels into shm buffer");
         return false;
     }

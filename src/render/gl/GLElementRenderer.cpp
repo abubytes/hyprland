@@ -8,7 +8,7 @@
 using namespace Render::GL;
 
 void CGLElementRenderer::draw(WP<CBorderPassElement> element, const CRegion& damage) {
-    const auto m_data = element->m_data;
+    const auto& m_data = element->m_data;
     if (m_data.hasGrad2)
         g_pHyprOpenGL->renderBorder(
             m_data.box, m_data.grad1, m_data.grad2, m_data.lerp,
@@ -81,7 +81,7 @@ void CGLElementRenderer::draw(WP<CPreBlurElement> element, const CRegion& damage
 };
 
 void CGLElementRenderer::draw(WP<CRectPassElement> element, const CRegion& damage) {
-    const auto m_data = element->m_data;
+    const auto& m_data = element->m_data;
 
     if (m_data.color.a == 1.F || !m_data.blur)
         g_pHyprOpenGL->renderRect(m_data.box, m_data.color, {.damage = &damage, .round = m_data.round, .roundingPower = m_data.roundingPower});
@@ -91,50 +91,54 @@ void CGLElementRenderer::draw(WP<CRectPassElement> element, const CRegion& damag
 };
 
 void CGLElementRenderer::draw(WP<CShadowPassElement> element, const CRegion& damage) {
-    const auto m_data = element->m_data;
+    const auto& m_data = element->m_data;
     m_data.deco->render(g_pHyprRenderer->m_renderData.pMonitor.lock(), m_data.a);
 };
 
 void CGLElementRenderer::draw(WP<CInnerGlowPassElement> element, const CRegion& damage) {
-    const auto m_data = element->m_data;
+    const auto& m_data = element->m_data;
     m_data.deco->render(g_pHyprRenderer->m_renderData.pMonitor.lock(), m_data.a);
 };
 
 void CGLElementRenderer::draw(WP<CTexPassElement> element, const CRegion& damage) {
-    const auto m_data = element->m_data;
+    const auto& m_data = element->m_data;
 
     g_pHyprOpenGL->renderTexture( //
         m_data.tex, m_data.box,
         {
             // blur settings for m_data.blur == true
             .blur                  = m_data.blur,
+            .forceBlurBlend        = m_data.forceBlurBlend,
             .blurA                 = m_data.blurA,
             .overallA              = m_data.overallA,
             .blockBlurOptimization = m_data.blockBlurOptimization.value_or(false),
             .blurredBG             = m_data.blurredBG,
+            .blurAlphaMatte        = m_data.blurAlphaMatte,
 
             // common settings
-            .damage             = m_data.damage.empty() ? &damage : &m_data.damage,
-            .surface            = m_data.surface,
-            .a                  = m_data.a,
-            .round              = m_data.round,
-            .roundingPower      = m_data.roundingPower,
-            .discardActive      = m_data.discardActive,
-            .allowCustomUV      = m_data.allowCustomUV,
-            .cmBackToSRGB       = m_data.cmBackToSRGB,
-            .cmBackToSRGBSource = m_data.cmBackToSRGBSource,
-            .discardMode        = m_data.ignoreAlpha.has_value() ? sc<uint32_t>(DISCARD_ALPHA) : m_data.discardMode,
-            .discardOpacity     = m_data.ignoreAlpha.has_value() ? *m_data.ignoreAlpha : m_data.discardOpacity,
-            .clipRegion         = m_data.clipRegion,
-            .currentLS          = m_data.currentLS,
+            .damage         = m_data.damage.empty() ? &damage : &m_data.damage,
+            .surface        = m_data.surface,
+            .a              = m_data.a,
+            .round          = m_data.round,
+            .roundingPower  = m_data.roundingPower,
+            .discardActive  = m_data.discardActive,
+            .allowCustomUV  = m_data.allowCustomUV,
+            .wrapX          = m_data.wrapX,
+            .wrapY          = m_data.wrapY,
+            .cmBackToSRGB   = m_data.cmBackToSRGB,
+            .discardMode    = m_data.ignoreAlpha.has_value() ? sc<uint32_t>(DISCARD_ALPHA) : m_data.discardMode,
+            .discardOpacity = m_data.ignoreAlpha.has_value() ? *m_data.ignoreAlpha : m_data.discardOpacity,
+            .clipRegion     = m_data.clipRegion,
+            .currentLS      = m_data.currentLS,
 
             .primarySurfaceUVTopLeft     = g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft,
             .primarySurfaceUVBottomRight = g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight,
+            .motionBlur                  = m_data.motionBlur,
         });
 };
 
 void CGLElementRenderer::draw(WP<CTextureMatteElement> element, const CRegion& damage) {
-    const auto m_data = element->m_data;
+    const auto& m_data = element->m_data;
 
     g_pHyprOpenGL->renderTextureMatte(m_data.tex, m_data.box, m_data.fb);
 };

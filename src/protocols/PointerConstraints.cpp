@@ -7,7 +7,7 @@
 #include "core/Compositor.hpp"
 #include "../managers/input/InputManager.hpp"
 #include "../render/Renderer.hpp"
-#include "../helpers/Monitor.hpp"
+#include "../output/Monitor.hpp"
 
 CPointerConstraint::CPointerConstraint(SP<CZwpLockedPointerV1> resource_, SP<CWLSurfaceResource> surf, wl_resource* region_, zwpPointerConstraintsV1Lifetime lifetime_) :
     m_resourceLocked(resource_), m_locked(true), m_lifetime(lifetime_) {
@@ -127,9 +127,11 @@ void CPointerConstraint::activate() {
 
     // TODO: hack, probably not a super duper great idea
     if (g_pSeatManager->m_state.pointerFocus != m_hlSurface->resource()) {
-        const auto SURFBOX = m_hlSurface->getSurfaceBoxGlobal();
-        const auto LOCAL   = SURFBOX.has_value() ? logicPositionHint() - SURFBOX->pos() : Vector2D{};
-        g_pSeatManager->setPointerFocus(m_hlSurface->resource(), LOCAL);
+        if (const auto W = Desktop::View::CWindow::fromView(m_hlSurface->view()); !W || !W->m_layoutFlags.cantLockCursor) {
+            const auto SURFBOX = m_hlSurface->getSurfaceBoxGlobal();
+            const auto LOCAL   = SURFBOX.has_value() ? logicPositionHint() - SURFBOX->pos() : Vector2D{};
+            g_pSeatManager->setPointerFocus(m_hlSurface->resource(), LOCAL);
+        }
     }
 
     if (m_locked)

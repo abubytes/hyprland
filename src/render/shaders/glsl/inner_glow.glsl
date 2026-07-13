@@ -6,6 +6,7 @@
 #define INNER_GLOW_GLSL
 
 #include "cm_helpers.glsl"
+#include "gradient.glsl"
 
 float innerGlowAlpha(float distFromEdge, float range, float glowPower) {
     if (distFromEdge >= range)
@@ -26,30 +27,13 @@ float innerGlowSmin(float a, float b, float k) {
     return min(a, b) - h * h * h * k * (1.0 / 6.0);
 }
 
-vec4 getInnerGlow(vec4 pixColor, vec2 v_texcoord, float radius, float roundingPower, vec2 topLeft, vec2 fullSize, float range, float glowPower, vec2 bottomRight
-#if USE_CM
-                  ,
-                  int sourceTF, int targetTF, mat3 convertMatrix, vec2 srcTFRange, vec2 dstTFRange
-#if USE_ICC
-                  ,
-                  highp sampler3D iccLut3D, float iccLutSize
-#else
-#if USE_TONEMAP || USE_SDR_MOD
-                  ,
-                  mat3 targetPrimariesXYZ
-#endif
-#if USE_TONEMAP
-                  ,
-                  float maxLuminance, float dstMaxLuminance, float dstRefLuminance, float srcRefLuminance
-#endif
-#if USE_SDR_MOD
-                  ,
-                  float sdrSaturation, float sdrBrightnessMultiplier
-#endif
-#endif
-#endif
-) {
+vec4 getInnerGlow(vec4 pixColor, vec4 colorSRGB, vec2 v_texcoord, float radius, float roundingPower, vec2 topLeft, vec2 fullSize, float range, float glowPower, vec2 bottomRight,
+                  int gradientLength, vec4 gradient[10], float angle, int gradient2Length, vec4 gradient2[10], float angle2, float gradientLerp, float alpha) {
     vec2 pixCoord = fullSize * v_texcoord;
+
+    if (gradientLength > 0 || gradient2Length > 0)
+        pixColor = getColorForCoord(v_texcoord, gradientLength, gradient, angle, gradient2Length, gradient2, angle2, gradientLerp);
+    pixColor.a *= alpha;
 
     // clip to the rounded rectangle shape using actual SDF
     vec2  center  = fullSize * 0.5;
@@ -79,28 +63,15 @@ vec4 getInnerGlow(vec4 pixColor, vec2 v_texcoord, float radius, float roundingPo
     // premultiply
     pixColor.rgb *= pixColor[3];
 
-#if USE_CM
-    pixColor = doColorManagement(pixColor, sourceTF, targetTF, convertMatrix, srcTFRange, dstTFRange
-#if USE_ICC
-                                 ,
-                                 iccLut3D, iccLutSize
+#if USE_MIRROR
+    vec4[2] pixColors;
+    pixColors[0] = pixColor;
+    pixColors[1] = colorSRGB;
+    pixColors[1].a = pixColor.a;
+    pixColors[1].rgb *= pixColors[1].a;
+    return pixColors;
 #else
-#if USE_TONEMAP || USE_SDR_MOD
-                                 ,
-                                 targetPrimariesXYZ
-#endif
-#if USE_TONEMAP
-                                 ,
-                                 maxLuminance, dstMaxLuminance, dstRefLuminance, srcRefLuminance
-#endif
-#if USE_SDR_MOD
-                                 ,
-                                 sdrSaturation, sdrBrightnessMultiplier
-#endif
-#endif
-    );
-#endif
-
     return pixColor;
+#endif
 }
 #endif

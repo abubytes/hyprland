@@ -7,28 +7,29 @@
 #include "../../managers/KeybindManager.hpp"
 #include "../../Compositor.hpp"
 
-#include "../../render/decorations/CHyprGroupBarDecoration.hpp"
 #include "../shared/complex/ComplexDataTypes.hpp"
-#include "../ConfigValue.hpp"
 #include "../shared/monitor/MonitorRuleManager.hpp"
 #include "../shared/workspace/WorkspaceRuleManager.hpp"
 #include "../shared/animation/AnimationTree.hpp"
 #include "../shared/monitor/Parser.hpp"
+#include "../shared/parserUtils/ParserUtils.hpp"
 #include "../supplementary/executor/Executor.hpp"
 #include "../supplementary/jeremy/Jeremy.hpp"
 #include "../../protocols/LayerShell.hpp"
 #include "../../xwayland/XWayland.hpp"
 #include "../../protocols/OutputManagement.hpp"
-#include "../../managers/animation/AnimationManager.hpp"
-#include "../../desktop/view/LayerSurface.hpp"
+#include "../../animation/AnimationManager.hpp"
 #include "../../desktop/rule/Engine.hpp"
 #include "../../desktop/rule/windowRule/WindowRule.hpp"
 #include "../../desktop/rule/layerRule/LayerRule.hpp"
 #include "../../debug/HyprCtl.hpp"
+#include "../../layout/LayoutManager.hpp"
 #include "../../desktop/state/FocusState.hpp"
+#include "../../desktop/state/GlobalWindowController.hpp"
 #include "../../layout/space/Space.hpp"
 #include "../../layout/supplementary/WorkspaceAlgoMatcher.hpp"
-
+#include "../../state/MonitorState.hpp"
+#include "../../state/WorkspaceState.hpp"
 #include "../../render/Renderer.hpp"
 #include "../../errorOverlay/Overlay.hpp"
 #include "../../managers/input/InputManager.hpp"
@@ -57,11 +58,11 @@
 #include "../../managers/input/trackpad/gestures/FloatGesture.hpp"
 #include "../../managers/input/trackpad/gestures/FullscreenGesture.hpp"
 #include "../../managers/input/trackpad/gestures/CursorZoomGesture.hpp"
+#include "../../managers/input/trackpad/gestures/ScrollMoveGesture.hpp"
 
 #include "../../event/EventBus.hpp"
-
 #include "../../protocols/types/ContentType.hpp"
-#include "render/types.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <hyprutils/path/Path.hpp>
@@ -76,12 +77,14 @@
 #include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <numbers>
 #include <ranges>
 #include <unordered_set>
 #include <hyprutils/string/String.hpp>
 #include <hyprutils/string/ConstVarList.hpp>
 #include <filesystem>
 #include <memory>
+
 using namespace Hyprutils::String;
 using namespace Hyprutils::Animation;
 using namespace Config;
@@ -114,7 +117,7 @@ static Hyprlang::CParseResult configHandleGradientSet(const char* VALUE, void** 
         if (var.find("deg") != std::string::npos) {
             // last arg
             try {
-                DATA->m_angle = std::stoi(std::string(var.substr(0, var.find("deg")))) * (PI / 180.0); // radians
+                DATA->m_angle = std::stoi(std::string(var.substr(0, var.find("deg")))) * (std::numbers::pi / 180.0); // radians
             } catch (...) {
                 Log::logger->log(Log::WARN, "Error parsing gradient {}", V);
                 parseError = "Error parsing gradient " + V;
@@ -130,7 +133,7 @@ static Hyprlang::CParseResult configHandleGradientSet(const char* VALUE, void** 
         }
 
         try {
-            const auto COL = configStringToInt(std::string(var));
+            const auto COL = ParserUtils::parseColor(var);
             if (!COL)
                 throw std::runtime_error(std::format("failed to parse {} as a color", var));
             DATA->m_colors.emplace_back(COL.value());
@@ -555,6 +558,11 @@ CConfigManager::CConfigManager() {
     m_config->addSpecialConfigValue("device", "keybinds", Hyprlang::INT{1});                 // enable/disable keybinds
     m_config->addSpecialConfigValue("device", "share_states", Hyprlang::INT{0});             // only for virtualkeyboards
     m_config->addSpecialConfigValue("device", "release_pressed_on_close", Hyprlang::INT{0}); // only for virtualkeyboards
+    m_config->addSpecialConfigValue("device", "tags", STRVAL_EMPTY);                         // only for keyboards and mice
+    m_config->addSpecialConfigValue("device", "eraser_button_mode", Hyprlang::INT{0});       // only for tablettools
+    m_config->addSpecialConfigValue("device", "eraser_button_override", Hyprlang::INT{0});   // only for tablettools
+    m_config->addSpecialConfigValue("device", "pressure_range_min", Hyprlang::FLOAT{-1.0});  // only for tablettools
+    m_config->addSpecialConfigValue("device", "pressure_range_max", Hyprlang::FLOAT{-1.0});  // only for tablettools
 
     m_config->addSpecialCategory("monitorv2", {.key = "output"});
     m_config->addSpecialConfigValue("monitorv2", "disabled", Hyprlang::INT{0});
@@ -641,7 +649,7 @@ void CConfigManager::reloadRuleConfigs() {
     // FIXME: this should also remove old values if they are removed
 
     for (const auto& r : Desktop::Rule::allMatchPropStrings()) {
-        m_config->addSpecialConfigValue("windowrule", ("match:" + r).c_str(), Hyprlang::STRING{""});
+        m_config->addSpecialConfigValue("windowrule", std::string{"match:"}.append(r).c_str(), Hyprlang::STRING{""});
     }
 
     for (const auto& r : Desktop::Rule::windowEffects()->allEffectStrings()) {
@@ -649,7 +657,7 @@ void CConfigManager::reloadRuleConfigs() {
     }
 
     for (const auto& r : Desktop::Rule::allMatchPropStrings()) {
-        m_config->addSpecialConfigValue("layerrule", ("match:" + r).c_str(), Hyprlang::STRING{""});
+        m_config->addSpecialConfigValue("layerrule", std::string{"match:"}.append(r).c_str(), Hyprlang::STRING{""});
     }
 
     for (const auto& r : Desktop::Rule::layerEffects()->allEffectStrings()) {
@@ -756,8 +764,8 @@ std::string CConfigManager::verify() {
 
 std::optional<std::string> CConfigManager::resetHLConfig() {
     g_pKeybindManager->clearKeybinds();
-    g_pAnimationManager->removeAllBeziers();
-    g_pAnimationManager->addBezierWithName("linear", Vector2D(0.0, 0.0), Vector2D(1.0, 1.0));
+    Animation::mgr()->removeAllBeziers();
+    Animation::mgr()->addBezierWithName("linear", Vector2D(0.0, 0.0), Vector2D(1.0, 1.0));
     g_pTrackpadGestures->clearGestures();
 
     Config::animationTree()->reset();
@@ -829,8 +837,10 @@ std::optional<std::string> CConfigManager::handleMonitorv2(const std::string& ou
     if (VAL && VAL->m_bSetByUser)
         parser.rule().m_sdrSaturation = std::any_cast<Hyprlang::FLOAT>(VAL->getValue());
     VAL = m_config->getSpecialConfigValuePtr("monitorv2", "vrr", output.c_str());
-    if (VAL && VAL->m_bSetByUser)
-        parser.rule().m_vrr = std::any_cast<Hyprlang::INT>(VAL->getValue());
+    if (VAL && VAL->m_bSetByUser) {
+        const auto VRR      = sc<int>(std::any_cast<Hyprlang::INT>(VAL->getValue()));
+        parser.rule().m_vrr = VRR < 0 ? std::nullopt : std::optional(VRR);
+    }
     VAL = m_config->getSpecialConfigValuePtr("monitorv2", "transform", output.c_str());
     if (VAL && VAL->m_bSetByUser)
         parser.parseTransform(std::any_cast<Hyprlang::STRING>(VAL->getValue()));
@@ -892,7 +902,7 @@ std::optional<std::string> CConfigManager::addRuleFromConfigKey(const std::strin
     SP<Desktop::Rule::CWindowRule> rule = makeShared<Desktop::Rule::CWindowRule>(name);
 
     for (const auto& r : Desktop::Rule::allMatchPropStrings()) {
-        auto VAL = m_config->getSpecialConfigValuePtr("windowrule", ("match:" + r).c_str(), name.c_str());
+        auto VAL = m_config->getSpecialConfigValuePtr("windowrule", std::string{"match:"}.append(r).c_str(), name.c_str());
         if (VAL && VAL->m_bSetByUser)
             rule->registerMatch(Desktop::Rule::matchPropFromString(r).value_or(Desktop::Rule::RULE_PROP_NONE), std::any_cast<Hyprlang::STRING>(VAL->getValue()));
     }
@@ -919,7 +929,7 @@ std::optional<std::string> CConfigManager::addLayerRuleFromConfigKey(const std::
     SP<Desktop::Rule::CLayerRule> rule = makeShared<Desktop::Rule::CLayerRule>(name);
 
     for (const auto& r : Desktop::Rule::allMatchPropStrings()) {
-        auto VAL = m_config->getSpecialConfigValuePtr("layerrule", ("match:" + r).c_str(), name.c_str());
+        auto VAL = m_config->getSpecialConfigValuePtr("layerrule", std::string{"match:"}.append(r).c_str(), name.c_str());
         if (VAL && VAL->m_bSetByUser)
             rule->registerMatch(Desktop::Rule::matchPropFromString(r).value_or(Desktop::Rule::RULE_PROP_NONE), std::any_cast<Hyprlang::STRING>(VAL->getValue()));
     }
@@ -962,17 +972,8 @@ Hyprlang::CParseResult CConfigManager::reloadRules() {
 }
 
 void CConfigManager::postConfigReload(const Hyprlang::CParseResult& result) {
-    Config::watcher()->update();
-
-    for (auto const& w : g_pCompositor->m_windows) {
+    for (auto const& w : Desktop::windowState()->windows()) {
         w->uncacheWindowDecos();
-    }
-
-    static auto PZOOMFACTOR = CConfigValue<Hyprlang::FLOAT>("cursor:zoom_factor");
-    for (auto const& m : g_pCompositor->m_monitors) {
-        *(m->m_cursorZoom) = *PZOOMFACTOR;
-        if (m->m_activeWorkspace)
-            m->m_activeWorkspace->m_space->recalculate();
     }
 
     // Update the keyboard layout to the cfg'd one if this is not the first launch
@@ -1025,11 +1026,8 @@ void CConfigManager::postConfigReload(const Hyprlang::CParseResult& result) {
         g_pCompositor->m_wantsXwayland = PENABLEXWAYLAND;
 #endif
 
-    if (!m_isFirstLaunch && !g_pCompositor->m_unsafeState)
-        refreshGroupBarGradients();
-
     // Updates dynamic window and workspace rules
-    for (auto const& w : g_pCompositor->getWorkspaces()) {
+    for (auto const& w : State::workspaceState()->workspaces()) {
         if (w->inert())
             continue;
         w->updateWindows();
@@ -1037,7 +1035,7 @@ void CConfigManager::postConfigReload(const Hyprlang::CParseResult& result) {
     }
 
     // Update window border colors
-    g_pCompositor->updateAllWindowsAnimatedDecorationValues();
+    Desktop::globalWindowController()->updateAllWindowsDecorations();
 
     // manual crash
     if (std::any_cast<Hyprlang::INT>(m_config->getConfigValue("debug:manual_crash")) && !m_manualCrashInitiated) {
@@ -1051,13 +1049,16 @@ void CConfigManager::postConfigReload(const Hyprlang::CParseResult& result) {
 
     auto disableStdout = !std::any_cast<Hyprlang::INT>(m_config->getConfigValue("debug:enable_stdout_logs"));
     if (disableStdout && m_isFirstLaunch)
-        Log::logger->log(Log::DEBUG, "Disabling stdout logs! Check the log for further logs.");
+        Log::logger->log(Log::DEBUG,
+                         "Disabling stdout logs (debug.enable_stdout_logs = 0). "
+                         "Further logs will be written to {}",
+                         g_pCompositor->m_instancePath + (ISDEBUG ? "/hyprlandd.log" : "/hyprland.log"));
 
-    for (auto const& m : g_pCompositor->m_monitors) {
+    for (auto const& m : State::monitorState()->monitors()) {
         // mark blur dirty
         m->m_blurFBDirty = true;
 
-        g_pCompositor->scheduleFrameForMonitor(m);
+        m->scheduleFrame();
 
         // Force the compositor to fully re-render all monitors
         m->m_forceFullFrames = 2;
@@ -1070,12 +1071,7 @@ void CConfigManager::postConfigReload(const Hyprlang::CParseResult& result) {
     // update plugins
     handlePluginLoads();
 
-    // update persistent workspaces
-    if (!m_isFirstLaunch)
-        g_pCompositor->ensurePersistentWorkspacesPresent();
-
-    // update layouts
-    Layout::Supplementary::algoMatcher()->updateWorkspaceLayouts();
+    Config::Supplementary::refresher()->scheduleRefresh(Supplementary::REFRESH_ALL);
 
     Event::bus()->m_events.config.reloaded.emit();
     if (g_pEventManager)
@@ -1099,13 +1095,13 @@ std::string CConfigManager::parseKeyword(const std::string& COMMAND, const std::
 
     // invalidate layouts if they changed
     if (COMMAND == "monitor" || COMMAND.contains("gaps_") || COMMAND.starts_with("dwindle:") || COMMAND.starts_with("master:")) {
-        for (auto const& m : g_pCompositor->m_monitors) {
+        for (auto const& m : State::monitorState()->monitors()) {
             g_layoutManager->recalculateMonitor(m);
         }
     }
 
     // Update window border colors
-    g_pCompositor->updateAllWindowsAnimatedDecorationValues();
+    Desktop::globalWindowController()->updateAllWindowsDecorations();
 
     // manual crash
     if (std::any_cast<Hyprlang::INT>(m_config->getConfigValue("debug:manual_crash")) && !m_manualCrashInitiated) {
@@ -1137,20 +1133,36 @@ bool CConfigManager::deviceConfigExplicitlySet(const std::string& dev, const std
 }
 
 int CConfigManager::getDeviceInt(const std::string& dev, const std::string& v, const std::string& fallback) {
-    return std::any_cast<Hyprlang::INT>(getConfigValueSafeDevice(dev, v, fallback)->getValue());
+    auto val = getConfigValueSafeDevice(dev, v, fallback);
+    if (!val)
+        return {};
+
+    return std::any_cast<Hyprlang::INT>(val->getValue());
 }
 
 float CConfigManager::getDeviceFloat(const std::string& dev, const std::string& v, const std::string& fallback) {
-    return std::any_cast<Hyprlang::FLOAT>(getConfigValueSafeDevice(dev, v, fallback)->getValue());
+    auto val = getConfigValueSafeDevice(dev, v, fallback);
+    if (!val)
+        return {};
+
+    return std::any_cast<Hyprlang::FLOAT>(val->getValue());
 }
 
 Vector2D CConfigManager::getDeviceVec(const std::string& dev, const std::string& v, const std::string& fallback) {
-    auto vec = std::any_cast<Hyprlang::VEC2>(getConfigValueSafeDevice(dev, v, fallback)->getValue());
+    auto val = getConfigValueSafeDevice(dev, v, fallback);
+    if (!val)
+        return {};
+
+    auto vec = std::any_cast<Hyprlang::VEC2>(val->getValue());
     return {vec.x, vec.y};
 }
 
 std::string CConfigManager::getDeviceString(const std::string& dev, const std::string& v, const std::string& fallback) {
-    auto VAL = std::string{std::any_cast<Hyprlang::STRING>(getConfigValueSafeDevice(dev, v, fallback)->getValue())};
+    auto val = getConfigValueSafeDevice(dev, v, fallback);
+    if (!val)
+        return "";
+
+    auto VAL = std::string{std::any_cast<Hyprlang::STRING>(val->getValue())};
 
     if (VAL == STRVAL_EMPTY)
         return "";
@@ -1413,7 +1425,7 @@ std::optional<std::string> CConfigManager::handleBezier(const std::string& comma
     if (!ARGS[5].empty())
         return "too many arguments";
 
-    g_pAnimationManager->addBezierWithName(bezierName, Vector2D(p1x, p1y), Vector2D(p2x, p2y));
+    Animation::mgr()->addBezierWithName(bezierName, Vector2D(p1x, p1y), Vector2D(p2x, p2y));
 
     return {};
 }
@@ -1430,7 +1442,7 @@ std::optional<std::string> CConfigManager::handleAnimation(const std::string& co
         return "no such animation";
 
     // This helper casts strings like "1", "true", "off", "yes"... to int.
-    int64_t enabledInt = configStringToInt(ARGS[1]).value_or(0) == 1;
+    int64_t enabledInt = ParserUtils::parseInt(ARGS[1]).value_or(0) == 1;
 
     // Checking that the int is 1 or 0 because the helper can return integers out of range.
     if (enabledInt != 0 && enabledInt != 1)
@@ -1458,13 +1470,13 @@ std::optional<std::string> CConfigManager::handleAnimation(const std::string& co
 
     std::string bezierName = ARGS[3];
 
-    if (!g_pAnimationManager->bezierExists(bezierName))
+    if (!Animation::mgr()->bezierExists(bezierName))
         return "no such bezier";
 
     Config::animationTree()->setConfigForNode(ANIMNAME, enabledInt, speed, ARGS[3], ARGS[4]);
 
     if (!ARGS[4].empty()) {
-        auto ERR = g_pAnimationManager->styleValidInConfigVar(ANIMNAME, ARGS[4]);
+        auto ERR = Animation::mgr()->styleValidInConfigVar(ANIMNAME, ARGS[4]);
 
         if (!ERR.empty())
             return ERR;
@@ -1721,24 +1733,24 @@ std::optional<std::string> CConfigManager::handleWorkspaceRules(const std::strin
                 wsRule.m_borderSize = std::stoi(rule.substr(delim + 11));
             } catch (...) { return "Error parsing workspace rule bordersize: {}", rule.substr(delim + 11); }
         else if ((delim = rule.find("border:")) != std::string::npos) {
-            CHECK_OR_THROW(configStringToInt(rule.substr(delim + 7)))
+            CHECK_OR_THROW(ParserUtils::parseInt(rule.substr(delim + 7)))
             wsRule.m_noBorder = !*X;
         } else if ((delim = rule.find("shadow:")) != std::string::npos) {
-            CHECK_OR_THROW(configStringToInt(rule.substr(delim + 7)))
+            CHECK_OR_THROW(ParserUtils::parseInt(rule.substr(delim + 7)))
             wsRule.m_noShadow = !*X;
         } else if ((delim = rule.find("rounding:")) != std::string::npos) {
-            CHECK_OR_THROW(configStringToInt(rule.substr(delim + 9)))
+            CHECK_OR_THROW(ParserUtils::parseInt(rule.substr(delim + 9)))
             wsRule.m_noRounding = !*X;
         } else if ((delim = rule.find("decorate:")) != std::string::npos) {
-            CHECK_OR_THROW(configStringToInt(rule.substr(delim + 9)))
+            CHECK_OR_THROW(ParserUtils::parseInt(rule.substr(delim + 9)))
             wsRule.m_decorate = *X;
         } else if ((delim = rule.find("monitor:")) != std::string::npos)
             wsRule.m_monitor = rule.substr(delim + 8);
         else if ((delim = rule.find("default:")) != std::string::npos) {
-            CHECK_OR_THROW(configStringToInt(rule.substr(delim + 8)))
+            CHECK_OR_THROW(ParserUtils::parseInt(rule.substr(delim + 8)))
             wsRule.m_isDefault = *X;
         } else if ((delim = rule.find("persistent:")) != std::string::npos) {
-            CHECK_OR_THROW(configStringToInt(rule.substr(delim + 11)))
+            CHECK_OR_THROW(ParserUtils::parseInt(rule.substr(delim + 11)))
             wsRule.m_isPersistent = *X;
         } else if ((delim = rule.find("defaultName:")) != std::string::npos)
             wsRule.m_defaultName = trim(rule.substr(delim + 12));
@@ -1806,7 +1818,7 @@ std::optional<std::string> CConfigManager::handleSource(const std::string& comma
                                                         }};
 
     if (auto r = glob(absolutePath(rawpath, m_configCurrentPath).c_str(), GLOB_TILDE, nullptr, glob_buf.get()); r != 0) {
-        std::string err = std::format("source= globbing error: {}", r == GLOB_NOMATCH ? "found no match" : GLOB_ABORTED ? "read error" : "out of memory");
+        std::string err = std::format("source= globbing error: {}", r == GLOB_NOMATCH ? "found no match" : r == GLOB_ABORTED ? "read error" : "out of memory");
         Log::logger->log(Log::ERR, "{}", err);
         return err;
     }
@@ -1990,7 +2002,9 @@ std::optional<std::string> CConfigManager::handleGesture(const std::string& comm
     else if (data[startDataIdx] == "cursorZoom") {
         result = g_pTrackpadGestures->addGesture(makeUnique<CCursorZoomTrackpadGesture>(std::string{data[startDataIdx + 1]}, std::string{data[startDataIdx + 2]}), fingerCount,
                                                  direction, modMask, deltaScale, disableInhibit);
-    } else if (data[startDataIdx] == "unset")
+    } else if (data[startDataIdx] == "scrollMove")
+        result = g_pTrackpadGestures->addGesture(makeUnique<CScrollMoveTrackpadGesture>(), fingerCount, direction, modMask, deltaScale, disableInhibit);
+    else if (data[startDataIdx] == "unset")
         result = g_pTrackpadGestures->removeGesture(fingerCount, direction, modMask, deltaScale, disableInhibit);
     else
         return std::format("Invalid gesture: {}", data[startDataIdx]);
@@ -2102,10 +2116,9 @@ std::expected<void, std::string> CConfigManager::generateDefaultConfig(const std
     if (!ofs.good())
         return std::unexpected("Config could not be generated.");
 
-    if (!safeMode) {
-        ofs << AUTOGENERATED_PREFIX;
+    if (!safeMode)
         ofs << EXAMPLE_CONFIG;
-    } else {
+    else {
         std::string n = std::string{EXAMPLE_CONFIG};
         replaceInString(n, "\n$menu = hyprlauncher\n", "\n$menu = hyprland-run\n");
         ofs << n;

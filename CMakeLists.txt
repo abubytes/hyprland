@@ -133,7 +133,7 @@ find_package(glslang CONFIG REQUIRED)
 set(AQUAMARINE_MINIMUM_VERSION 0.9.3)
 set(HYPRLANG_MINIMUM_VERSION 0.6.7)
 set(HYPRCURSOR_MINIMUM_VERSION 0.1.7)
-set(HYPRUTILS_MINIMUM_VERSION 0.13.0)
+set(HYPRUTILS_MINIMUM_VERSION 0.13.1)
 set(HYPRGRAPHICS_MINIMUM_VERSION 0.5.1)
 
 pkg_check_modules(aquamarine_dep REQUIRED IMPORTED_TARGET aquamarine>=${AQUAMARINE_MINIMUM_VERSION})
@@ -249,8 +249,8 @@ set_source_files_properties(${CMAKE_SOURCE_DIR}/src/version.h PROPERTIES GENERAT
 
 set(XKBCOMMON_MINIMUM_VERSION 1.11.0)
 set(WAYLAND_SERVER_MINIMUM_VERSION 1.22.91)
-set(WAYLAND_SERVER_PROTOCOLS_MINIMUM_VERSION 1.47)
-set(LIBINPUT_MINIMUM_VERSION 1.28)
+set(WAYLAND_SERVER_PROTOCOLS_MINIMUM_VERSION 1.49)
+set(LIBINPUT_MINIMUM_VERSION 1.29)
 
 pkg_check_modules(
   deps
@@ -537,6 +537,7 @@ protocolnew("protocols" "wlr-virtual-pointer-unstable-v1" true)
 protocolnew("protocols" "input-method-unstable-v2" true)
 protocolnew("protocols" "wlr-output-management-unstable-v1" true)
 protocolnew("protocols" "kde-server-decoration" true)
+protocolnew("protocols" "vicinae-hotkey-v1" true)
 protocolnew("protocols" "wlr-data-control-unstable-v1" true)
 protocolnew("${HYPRLAND_PROTOCOLS}/protocols" "hyprland-focus-grab-v1" true)
 protocolnew("protocols" "wlr-layer-shell-unstable-v1" true)
@@ -590,6 +591,7 @@ protocolnew("staging/fifo" "fifo-v1" false)
 protocolnew("staging/commit-timing" "commit-timing-v1" false)
 protocolnew("staging/ext-image-capture-source" "ext-image-capture-source-v1" false)
 protocolnew("staging/ext-image-copy-capture" "ext-image-copy-capture-v1" false)
+protocolnew("staging/ext-background-effect" "ext-background-effect-v1" false)
 
 protocolwayland()
 
@@ -603,6 +605,12 @@ else()
   add_subdirectory(hyprpm)
   message(STATUS "hyprpm is enabled (NO_HYPRPM not defined)")
 endif()
+
+# Set proper permissions for directories, otherwise they could end up 700
+set(CMAKE_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS
+    OWNER_READ OWNER_WRITE OWNER_EXECUTE
+    GROUP_READ GROUP_EXECUTE
+    WORLD_READ WORLD_EXECUTE)
 
 # binary and symlink
 install(TARGETS Hyprland)
@@ -628,10 +636,6 @@ add_compile_definitions(DATAROOTDIR="${CMAKE_INSTALL_FULL_DATAROOTDIR}")
 # installable assets
 file(GLOB_RECURSE INSTALLABLE_ASSETS "assets/install/*")
 install(FILES ${INSTALLABLE_ASSETS}
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/hypr)
-
-# default config
-install(FILES ${CMAKE_SOURCE_DIR}/example/hyprland.conf
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/hypr)
 
 # default lua config

@@ -7,7 +7,7 @@
 
 using namespace Render::GL;
 
-static bool compareFloat(auto a, auto b) {
+static bool compareFloat(const auto& a, const auto& b) {
     if (a.size() != b.size())
         return false;
 
@@ -126,6 +126,7 @@ void CShader::getUniformLocations() {
 
     m_uniformLocations[SHADER_PROJ]        = getUniform("proj");
     m_uniformLocations[SHADER_COLOR]       = getUniform("color");
+    m_uniformLocations[SHADER_COLOR_SRGB]  = getUniform("colorSRGB");
     m_uniformLocations[SHADER_ALPHA_MATTE] = getUniform("texMatte");
     m_uniformLocations[SHADER_TEX_TYPE]    = getUniform("texType");
 
@@ -144,18 +145,26 @@ void CShader::getUniformLocations() {
     m_uniformLocations[SHADER_CONVERT_MATRIX]       = getUniform("convertMatrix");
     m_uniformLocations[SHADER_LUT_3D]               = getUniform("iccLut3D");
     m_uniformLocations[SHADER_LUT_SIZE]             = getUniform("iccLutSize");
+    m_uniformLocations[SHADER_TONEMAP_MODE]         = getUniform("tonemapMode");
     //
-    m_uniformLocations[SHADER_TEX]                 = getUniform("tex");
-    m_uniformLocations[SHADER_BLURRED_BG]          = getUniform("blurredBG");
-    m_uniformLocations[SHADER_UV_SIZE]             = getUniform("uvSize");
-    m_uniformLocations[SHADER_UV_OFFSET]           = getUniform("uvOffset");
-    m_uniformLocations[SHADER_ALPHA]               = getUniform("alpha");
-    m_uniformLocations[SHADER_POS_ATTRIB]          = getAttrib("pos");
-    m_uniformLocations[SHADER_TEX_ATTRIB]          = getAttrib("texcoord");
-    m_uniformLocations[SHADER_MATTE_TEX_ATTRIB]    = getAttrib("texcoordMatte");
-    m_uniformLocations[SHADER_DISCARD_OPAQUE]      = getUniform("discardOpaque");
-    m_uniformLocations[SHADER_DISCARD_ALPHA]       = getUniform("discardAlpha");
-    m_uniformLocations[SHADER_DISCARD_ALPHA_VALUE] = getUniform("discardAlphaValue");
+    m_uniformLocations[SHADER_TEX]                    = getUniform("tex");
+    m_uniformLocations[SHADER_BLURRED_BG]             = getUniform("blurredBG");
+    m_uniformLocations[SHADER_UV_SIZE]                = getUniform("uvSize");
+    m_uniformLocations[SHADER_UV_OFFSET]              = getUniform("uvOffset");
+    m_uniformLocations[SHADER_MOTION_PREV_BOX]        = getUniform("motionPrevBox");
+    m_uniformLocations[SHADER_MOTION_CURR_BOX]        = getUniform("motionCurrBox");
+    m_uniformLocations[SHADER_MOTION_SOURCE_BOX]      = getUniform("motionSourceBox");
+    m_uniformLocations[SHADER_MOTION_SOURCE_TEX_SIZE] = getUniform("motionSourceTexSize");
+    m_uniformLocations[SHADER_MOTION_SAMPLES]         = getUniform("motionSamples");
+    m_uniformLocations[SHADER_BLUR_ALPHA_MATTE]       = getUniform("blurAlphaMatte");
+    m_uniformLocations[SHADER_BLUR_ALPHA]             = getUniform("blurAlpha");
+    m_uniformLocations[SHADER_ALPHA]                  = getUniform("alpha");
+    m_uniformLocations[SHADER_POS_ATTRIB]             = getAttrib("pos");
+    m_uniformLocations[SHADER_TEX_ATTRIB]             = getAttrib("texcoord");
+    m_uniformLocations[SHADER_MATTE_TEX_ATTRIB]       = getAttrib("texcoordMatte");
+    m_uniformLocations[SHADER_DISCARD_OPAQUE]         = getUniform("discardOpaque");
+    m_uniformLocations[SHADER_DISCARD_ALPHA]          = getUniform("discardAlpha");
+    m_uniformLocations[SHADER_DISCARD_ALPHA_VALUE]    = getUniform("discardAlphaValue");
     /* set in createVao
         m_uniformLocations[SHADER_SHADER_VAO]
         m_uniformLocations[SHADER_SHADER_VBO_POS]
@@ -242,6 +251,7 @@ void CShader::createVao() {
 
     m_uniformLocations[SHADER_SHADER_VAO] = shaderVao;
     m_uniformLocations[SHADER_SHADER_VBO] = shaderVbo;
+    m_usesCustomUV                        = false;
 
     RASSERT(m_uniformLocations[SHADER_SHADER_VAO] >= 0, "SHADER_SHADER_VAO could not be created");
     RASSERT(m_uniformLocations[SHADER_SHADER_VBO] >= 0, "SHADER_SHADER_VBO_POS could not be created");
@@ -364,7 +374,7 @@ void CShader::setUniformfv(eShaderUniform location, GLsizei count, const std::ve
     auto& cached = uniformStatus.at(location);
 
     if (cached.index() != 0) {
-        auto val = std::get<SUniformVData>(cached);
+        const auto& val = std::get<SUniformVData>(cached);
         if (val.count == count && compareFloat(val.value, value))
             return;
     }
@@ -425,4 +435,12 @@ int CShader::getInitialTime() const {
 
 void CShader::setInitialTime(int time) {
     m_initialTime = time;
+}
+
+bool CShader::usesCustomUV() const {
+    return m_usesCustomUV;
+}
+
+void CShader::setUsesCustomUV(bool usesCustomUV) {
+    m_usesCustomUV = usesCustomUV;
 }
