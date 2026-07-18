@@ -251,10 +251,8 @@ void CMonitorStateTracker::rebuildVirtualMonitors() {
             if (OLD_MONITOR && OLD_MONITOR != monitor && w->m_isFloating)
                 w->layoutTarget()->setPositionGlobal(w->layoutTarget()->position().translate(-OLD_MONITOR->m_position + monitor->m_position));
 
-            if (Fullscreen::controller()->isFullscreen(w)) {
-                *w->m_realPosition = monitor->m_position;
-                *w->m_realSize     = monitor->m_size;
-            }
+            if (Fullscreen::controller()->isFullscreen(w))
+                w->setBox(CBox{monitor->m_position, monitor->m_size});
 
             w->updateToplevel();
         }
