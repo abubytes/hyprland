@@ -212,9 +212,10 @@ eScreenshareError CScreenshareFrame::share(SP<IHLBuffer> buffer, const CRegion& 
 }
 
 void CScreenshareFrame::copy() {
-    if (done()) {
-        LOGM(Log::TRACE, "[SSDBG] frame copy skipped done type={} mon={} shared={} copied={} failed={}", m_session.expired() ? sc<int>(SHARE_NONE) : sc<int>(m_session->m_type),
-             !m_session.expired() && m_session->monitor() ? m_session->monitor()->m_name : "<none>", m_shared, m_copied, m_failed);
+    if (done() || m_copyInFlight) {
+        LOGM(Log::TRACE, "[SSDBG] frame copy skipped done type={} mon={} shared={} copied={} failed={} inFlight={}",
+             m_session.expired() ? sc<int>(SHARE_NONE) : sc<int>(m_session->m_type), !m_session.expired() && m_session->monitor() ? m_session->monitor()->m_name : "<none>", m_shared,
+             m_copied, m_failed, m_copyInFlight);
         return;
     }
 
@@ -264,8 +265,8 @@ bool CScreenshareFrame::hasNoScreenShareOverlays(PHLMONITOR pMonitor) {
         if UNLIKELY (!l->visible())
             continue;
 
-        const auto REALPOS  = l->m_realPosition->value();
-        const auto REALSIZE = l->m_realSize->value();
+        const auto REALPOS  = l->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+        const auto REALSIZE = l->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
         const auto BOX      = noScreenShareBoxForMonitor(pMonitor, m_session->m_captureBox, CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)});
 
         if (boxTouchesBuffer(BOX, m_bufferSize))
@@ -282,9 +283,10 @@ bool CScreenshareFrame::hasNoScreenShareOverlays(PHLMONITOR pMonitor) {
             continue;
 
         const auto renderOffset = PWORKSPACE && !w->m_pinned ? PWORKSPACE->m_renderOffset->value() : Vector2D{};
-        const auto REALPOS      = w->m_realPosition->value() + renderOffset;
+        const auto REALSIZE     = w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+        const auto REALPOS      = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + renderOffset;
         const auto BOX          = noScreenShareBoxForMonitor(pMonitor, m_session->m_captureBox,
-                                                             CBox{REALPOS.x, REALPOS.y, std::max(w->m_realSize->value().x, 5.0), std::max(w->m_realSize->value().y, 5.0)});
+                                                             CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)});
 
         if (boxTouchesBuffer(BOX, m_bufferSize))
             return true;
@@ -332,8 +334,8 @@ void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
         if UNLIKELY (!l->visible())
             continue;
 
-        const auto REALPOS  = l->m_realPosition->value();
-        const auto REALSIZE = l->m_realSize->value();
+        const auto REALPOS  = l->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+        const auto REALSIZE = l->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
 
         const auto noScreenShareBox =
             noScreenShareBoxForMonitor(pMonitor, m_session->m_captureBox, CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)});
@@ -356,9 +358,10 @@ void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
             continue;
 
         const auto renderOffset     = PWORKSPACE && !w->m_pinned ? PWORKSPACE->m_renderOffset->value() : Vector2D{};
-        const auto REALPOS          = w->m_realPosition->value() + renderOffset;
+        const auto REALSIZE         = w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+        const auto REALPOS          = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + renderOffset;
         const auto noScreenShareBox = noScreenShareBoxForMonitor(pMonitor, m_session->m_captureBox,
-                                                                 CBox{REALPOS.x, REALPOS.y, std::max(w->m_realSize->value().x, 5.0), std::max(w->m_realSize->value().y, 5.0)});
+                                                                 CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)});
 
         // Rounding can leak pixels when a region capture shifts the mask relative to the output.
         const auto dontRound     = m_session->m_captureBox.pos() != Vector2D() || Fullscreen::controller()->isFullscreen(w, Fullscreen::FSMODE_FULLSCREEN);
@@ -510,7 +513,8 @@ void CScreenshareFrame::renderWindow() {
         return;
 
     CRegion fakeDamage = {0, 0, INT16_MAX, INT16_MAX};
-    Pointer::mgr()->renderSoftwareCursorsFor(PMONITOR->m_self.lock(), NOW, fakeDamage, g_pInputManager->getMouseCoordsInternal() - PWINDOW->m_realPosition->value(), true);
+    Pointer::mgr()->renderSoftwareCursorsFor(PMONITOR->m_self.lock(), NOW, fakeDamage,
+                                             g_pInputManager->getMouseCoordsInternal() - PWINDOW->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT), true);
 }
 
 void CScreenshareFrame::render() {
@@ -580,8 +584,15 @@ bool CScreenshareFrame::copyDmabuf() {
 
     g_pHyprRenderer->m_renderData.blockScreenShader = true;
 
+    m_copyInFlight = true;
+
     g_pHyprRenderer->endRender([self = m_self]() {
-        if (!self || self.expired() || self->m_copied)
+        if (!self || self.expired())
+            return;
+
+        self->m_copyInFlight = false;
+
+        if (self->m_copied)
             return;
 
         LOGM(Log::TRACE, "Copied frame via dma");
