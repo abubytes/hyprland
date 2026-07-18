@@ -629,8 +629,10 @@ void CPointerManager::renderSoftwareCursorsFor(PHLMONITOR pMonitor, const Time::
     }
 
     // don't render cursor if forced but we are already using sw cursors for the monitor
-    // otherwise we draw the cursor again for screencopy when using sw cursors
-    if (forceRender && (state->hardwareFailed || state->softwareLocks != 0))
+    // otherwise we draw the cursor again for screencopy when using sw cursors.
+    // Virtual (split) captures re-render the scene from scratch without a cursor, so their
+    // export buffer never already contains SW cursors — always allow the forced overlay.
+    if (forceRender && !pMonitor->isVirtual() && (state->hardwareFailed || state->softwareLocks != 0))
         return;
 
     auto box = state->box.copy();
