@@ -4,6 +4,8 @@
 #include "WaylandProtocol.hpp"
 #include "fractional-scale-v1.hpp"
 
+#include "../helpers/signal/Signal.hpp"
+
 class CFractionalScaleProtocol;
 class CWLSurfaceResource;
 
@@ -27,8 +29,12 @@ class CFractionalScaleAddon {
 
   private:
     SP<CWpFractionalScaleV1> m_resource;
-    float                    m_scale = -1.F; // unset
+    std::optional<float>     m_scale = std::nullopt;
     WP<CWLSurfaceResource>   m_surface;
+
+    struct {
+        CHyprSignalListener surfaceUnmap;
+    } m_listeners;
 
     friend class CFractionalScaleProtocol;
 };
@@ -41,6 +47,7 @@ class CFractionalScaleProtocol : public IWaylandProtocol {
 
     void         onSurfaceDestroy(SP<CWLSurfaceResource> surf);
     void         sendScale(SP<CWLSurfaceResource> surf, const float& scale);
+    bool         hasKnownScale(SP<CWLSurfaceResource> surf);
 
   private:
     void removeAddon(CFractionalScaleAddon*);

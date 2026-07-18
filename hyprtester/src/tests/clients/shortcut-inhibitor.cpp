@@ -1,4 +1,5 @@
 #include "../../hyprctlCompat.hpp"
+#include "../../Log.hpp"
 #include "../shared.hpp"
 #include "tests.hpp"
 #include "build.hpp"
@@ -106,7 +107,7 @@ CClient::CClient() {
         throw std::exception();
 
     ret = std::string{this->readBuf.data()};
-    if (ret.find("inhibiting") == std::string::npos) {
+    if (!ret.contains("inhibiting")) {
         NLog::log("{}shortcut-inhibitor client didn't return inhibiting", Colors::RED);
         throw std::exception();
     }
@@ -149,8 +150,19 @@ TEST_CASE(shortcutInhibitor) {
     } catch (...) { FAIL_TEST("Couldn't start the client"); }
 
     NLog::log("{}Testing keybinds", Colors::GREEN);
+
+    // wait until flag becomes false (CI timing can vary)
+    bool ok = false;
+    for (int i = 0; i < 20; ++i) {
+        if (!checkFlag()) {
+            ok = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT(ok, true);
+
     //basic keybind test
-    EXPECT(checkFlag(), false);
     EXPECT(getFromSocket("/eval hl.bind('SUPER + Y', hl.dsp.exec_cmd('touch " + flagFile + "'))"), "ok");
     OK(getFromSocket("/eval hl.plugin.test.keybind(1, 7, 29)"));
     EXPECT(attemptCheckFlag(20, 50), false);

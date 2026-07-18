@@ -9,6 +9,8 @@
 #include "../../layout/LayoutManager.hpp"
 #include "../../desktop/state/FocusState.hpp"
 #include "../../Compositor.hpp"
+#include "../../managers/EventManager.hpp"
+#include "../../managers/fullscreen/FullscreenController.hpp"
 
 #include <algorithm>
 
@@ -60,10 +62,14 @@ void CGroup::init() {
     }
 
     updateWindowVisibility();
+
+    g_pEventManager->postEvent(SHyprIPCEvent({.event = "togglegroup", .data = std::format("1,{:x}", rc<uintptr_t>(m_windows.at(0).get()))}));
 }
 
 void CGroup::destroy() {
-    while (true) {
+    const auto POWNER = head();
+
+    while (!m_windows.empty()) {
         if (m_windows.size() == 1) {
             remove(m_windows.at(0).lock());
             break;
@@ -71,6 +77,9 @@ void CGroup::destroy() {
 
         remove(m_windows.at(0).lock());
     }
+
+    if (POWNER)
+        g_pEventManager->postEvent(SHyprIPCEvent({.event = "togglegroup", .data = std::format("0,{:x}", rc<uintptr_t>(POWNER.get()))}));
 }
 
 CGroup::~CGroup() {
@@ -83,7 +92,7 @@ bool CGroup::has(PHLWINDOW w) const {
     return std::ranges::contains(m_windows, w);
 }
 
-void CGroup::add(PHLWINDOW w) {
+void CGroup::add(PHLWINDOW w, std::optional<size_t> index) {
     static auto INSERT_AFTER_CURRENT = CConfigValue<Config::INTEGER>("group:insert_after_current");
 
     if (w->m_group) {
@@ -91,13 +100,27 @@ void CGroup::add(PHLWINDOW w) {
             return;
 
         const auto WINDOWS = w->m_group->windows();
-        for (const auto& w : WINDOWS) {
-            w->m_group->remove(w.lock());
-            add(w.lock());
+        for (size_t i = 0; i < WINDOWS.size(); ++i) {
+            const auto WINDOW = WINDOWS.at(i).lock();
+            if (!WINDOW)
+                continue;
+
+            WINDOW->m_group->remove(WINDOW);
+            add(WINDOW, index ? std::optional(*index + i) : std::nullopt);
         }
 
         return;
     }
+
+    const auto FS_INTERNAL_MODE            = m_target->window() ? Fullscreen::controller()->getFullscreenModes(m_target->window()).internal : Fullscreen::FSMODE_NONE;
+    const auto OLD_FULLSCREEN_WINDOW       = FS_INTERNAL_MODE != Fullscreen::FSMODE_NONE ? current() : nullptr;
+    const bool FS_WINDOW_IS_LAYOUT_HANDLED = FS_INTERNAL_MODE != Fullscreen::FSMODE_NONE ? Fullscreen::controller()->layoutManagedFS(m_target->window()) : false;
+
+    if (Fullscreen::controller()->isFullscreen(w))
+        Fullscreen::controller()->setFullscreenMode(w, Fullscreen::FSMODE_NONE);
+
+    if (OLD_FULLSCREEN_WINDOW)
+        Fullscreen::controller()->setFullscreenMode(OLD_FULLSCREEN_WINDOW, Fullscreen::FSMODE_NONE);
 
     if (w->layoutTarget()->space()) {
         // remove the target from a space if it is in one
@@ -109,7 +132,16 @@ void CGroup::add(PHLWINDOW w) {
     w->m_target->setSpaceGhost(m_target->space());
     w->m_target->setFloating(m_target->floating());
 
-    if (*INSERT_AFTER_CURRENT) {
+    // a window in a group lives on the group's monitor/workspace
+    if (const auto WS = m_target->workspace(); WS && w->m_workspace != WS) {
+        w->m_monitor = WS->m_monitor;
+        w->moveToWorkspace(WS);
+    }
+
+    if (index) {
+        m_current = std::min(*index, m_windows.size());
+        m_windows.insert(m_windows.begin() + m_current, w);
+    } else if (*INSERT_AFTER_CURRENT) {
         m_windows.insert(m_windows.begin() + m_current + 1, w);
         m_current++;
     } else {
@@ -119,10 +151,19 @@ void CGroup::add(PHLWINDOW w) {
 
     applyWindowDecosAndUpdates(w);
     updateWindowVisibility();
+
+    if (FS_INTERNAL_MODE != Fullscreen::FSMODE_NONE) {
+        Fullscreen::controller()->setFullscreenMode(w, FS_INTERNAL_MODE, std::nullopt, FS_WINDOW_IS_LAYOUT_HANDLED);
+        w->m_target->warpPositionSize();
+
+        if (OLD_FULLSCREEN_WINDOW)
+            OLD_FULLSCREEN_WINDOW->m_target->setPositionGlobal(w->m_target->position());
+    }
+
     m_target->recalc();
 }
 
-void CGroup::remove(PHLWINDOW w, Math::eDirection dir) {
+void CGroup::remove(PHLWINDOW w, Math::eDirection dir, eRemoveFromGroupReason reason) {
     std::optional<size_t> idx;
     for (size_t i = 0; i < m_windows.size(); ++i) {
         if (m_windows.at(i) == w) {
@@ -171,6 +212,10 @@ void CGroup::remove(PHLWINDOW w, Math::eDirection dir) {
                 default: break;
             }
         }
+
+        // We don't need to assign a window to a new space if we intend to unmap it
+        if (reason == REMOVE_FROM_GROUP_REASON_UNMAP_WINDOW)
+            return;
         w->m_target->assignToSpace(m_target->space(), focalPoint);
     }
 }
@@ -193,29 +238,31 @@ void CGroup::moveCurrent(bool next) {
 }
 
 void CGroup::setCurrent(size_t idx) {
-    if (idx == m_current)
+    if (idx == m_current || !m_target->window())
         return;
 
-    const auto FS_STATE  = m_target->fullscreenMode();
-    const auto WASFOCUS  = Desktop::focusState()->window() == current();
-    auto       oldWindow = m_windows.at(m_current).lock();
+    const bool IS_FULLSCREEN     = Fullscreen::controller()->isFullscreen(m_target->window());
+    const auto FS_MODE_INTERNAL  = Fullscreen::controller()->getFullscreenModes(m_target->window()).internal;
+    const bool IS_LAYOUT_HANDLED = Fullscreen::controller()->layoutManagedFS(m_target->window());
+    const auto WASFOCUS          = Desktop::focusState()->window() == current();
+    auto       oldWindow         = m_windows.at(m_current).lock();
 
-    if (FS_STATE != FSMODE_NONE)
-        g_pCompositor->setWindowFullscreenInternal(oldWindow, FSMODE_NONE);
+    if (IS_FULLSCREEN)
+        Fullscreen::controller()->setFullscreenMode(oldWindow, Fullscreen::FSMODE_NONE);
 
     m_current = std::clamp(idx, sc<size_t>(0), m_windows.size() - 1);
     updateWindowVisibility();
 
     auto newWindow = m_windows.at(m_current).lock();
 
-    if (FS_STATE != FSMODE_NONE) {
-        g_pCompositor->setWindowFullscreenInternal(newWindow, FS_STATE);
+    if (IS_FULLSCREEN) {
+        Fullscreen::controller()->setFullscreenMode(newWindow, FS_MODE_INTERNAL, std::nullopt, IS_LAYOUT_HANDLED);
         newWindow->m_target->warpPositionSize();
         oldWindow->m_target->setPositionGlobal(newWindow->m_target->position()); // TODO: this is a hack and sucks
     }
 
     if (WASFOCUS)
-        Desktop::focusState()->rawWindowFocus(current(), FOCUS_REASON_DESKTOP_STATE_CHANGE);
+        Desktop::focusState()->rawWindowFocus(current(), FOCUS_REASON_GROUP_CURRENT_WINDOW_CHANGE);
 }
 
 void CGroup::setCurrent(PHLWINDOW w) {

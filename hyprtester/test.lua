@@ -93,6 +93,7 @@ hl.animation({ leaf = "workspacesIn", enabled = true, speed = 1.21, bezier = "al
 hl.animation({ leaf = "workspacesOut", enabled = true, speed = 1.94, bezier = "almostLinear", style = "fade" })
 
 hl.device({ name = "test-mouse-1", enabled = true })
+hl.device({ name = "test-keyboard-1", enabled = true, tags = "test-tag"})
 
 hl.config({
     dwindle = {
@@ -200,9 +201,12 @@ hl.bind(mainMod .. " + u", hl.dsp.submap("submap1"))
 
 hl.define_submap("submap1", function()
     hl.bind("u", hl.dsp.submap("submap2"))
+    hl.bind(mainMod .. " + u", hl.dsp.submap("submap3"))
     hl.bind("i", hl.dsp.submap("submap3"))
     hl.bind("o", hl.dsp.exec_cmd(terminal))
     hl.bind("p", hl.dsp.submap("reset"))
+    hl.bind("mouse_down", hl.dsp.exec_cmd("touch /tmp/hyprtester-keybinds.txt"))
+    hl.bind("mouse:272", hl.dsp.exec_cmd("touch /tmp/hyprtester-keybinds.txt"))
 end)
 
 hl.define_submap("submap2", "submap1", function()
@@ -293,3 +297,32 @@ hl.gesture({ fingers = 4, direction = "left", action = function() hl.dispatch(hl
 hl.gesture({ fingers = 2, direction = "pinch", action = "cursorZoom", zoom_level = "1", mode = "live" })
 
 hl.gesture({ fingers = 2, direction = "right", action = "float", disable_inhibit = true })
+
+hl.layout.register("columns", {
+    recalculate = function(ctx)
+        local n = #ctx.targets
+        if n == 0 then
+            return
+        end
+
+        for i, target in ipairs(ctx.targets) do
+            target:place(ctx:column(i, n))
+        end
+    end,
+})
+
+hl.layout.register("grid", {
+    recalculate = function(ctx)
+        local n = #ctx.targets
+        if n == 0 then
+            return
+        end
+
+        local cols = math.ceil(math.sqrt(n))
+
+        for i, target in ipairs(ctx.targets) do
+            target:place(ctx:grid_cell(i, cols))
+        end
+    end,
+})
+

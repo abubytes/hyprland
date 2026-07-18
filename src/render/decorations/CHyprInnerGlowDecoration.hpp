@@ -1,6 +1,7 @@
 #pragma once
 
 #include "IHyprWindowDecoration.hpp"
+#include "../../config/shared/complex/ComplexDataTypes.hpp"
 
 class CHyprInnerGlowDecoration : public IHyprWindowDecoration {
   public:
@@ -28,6 +29,11 @@ class CHyprInnerGlowDecoration : public IHyprWindowDecoration {
     void                               render(PHLMONITOR, float const& a);
 
   private:
+    bool visible();
+    void drawGlowInternal(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad, float a);
+    void drawGlowInternal(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1, const Config::CGradientValueData& grad2, float lerp,
+                          float a);
+
     PHLWINDOWREF m_window;
 
     Vector2D     m_lastWindowPos;

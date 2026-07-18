@@ -12,6 +12,19 @@
 #include <expected>
 
 namespace Layout {
+
+    enum eRecalculateReason : uint8_t {
+        RECALCULATE_REASON_UNKNOWN, // when the recalculate reason is unknown or not important to preserve
+        RECALCULATE_REASON_WORKSPACE_CHANGE,
+        RECALCULATE_REASON_SPECIAL_WORKSPACE_TOGGLE,
+        RECALCULATE_REASON_TOGGLE_DEFAULT_HANDLED_FULLSCREEN,
+        RECALCULATE_REASON_TOGGLE_LAYOUT_HANDLED_FULLSCREEN,
+        RECALCULATE_REASON_INVALIDATE_MONITOR_GEOMETRIES,
+        RECALCULATE_REASON_RENDER_MONITOR,
+    };
+
+    eRecalculateReason recalcMonitorReasonToRecalcReason(CLayoutManager::eRecalculateMonitorReason reason);
+
     class ITarget;
     class CAlgorithm;
 
@@ -30,11 +43,10 @@ namespace Layout {
 
         void                            setAlgorithmProvider(SP<CAlgorithm> algo);
         void                            recheckWorkArea();
-        void                            setFullscreen(SP<ITarget> t, eFullscreenMode mode);
 
         void                            moveTargetInDirection(SP<ITarget> t, Math::eDirection dir, bool silent);
 
-        void                            recalculate();
+        void                            recalculate(eRecalculateReason reason = RECALCULATE_REASON_UNKNOWN);
 
         void                            toggleTargetFloating(SP<ITarget> t);
 
@@ -68,4 +80,6 @@ namespace Layout {
         // for recalc
         CHyprSignalListener m_geomUpdateCallback;
     };
+
+    bool isHardRecalculateReason(eRecalculateReason reason);
 };

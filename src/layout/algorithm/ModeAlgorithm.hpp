@@ -5,8 +5,11 @@
 #include "../../helpers/memory/Memory.hpp"
 
 #include "../LayoutManager.hpp"
+#include "../space/Space.hpp"
 
-#include <expected>
+namespace Fullscreen {
+    class IFullscreenHandler;
+}
 
 namespace Layout {
 
@@ -30,7 +33,7 @@ namespace Layout {
         virtual void resizeTarget(const Vector2D& Δ, SP<ITarget> target, eRectCorner corner = CORNER_NONE) = 0;
 
         // recalculate layout
-        virtual void recalculate() = 0;
+        virtual void recalculate(eRecalculateReason reason = RECALCULATE_REASON_UNKNOWN) = 0;
 
         // swap targets
         virtual void swapTargets(SP<ITarget> a, SP<ITarget> b) = 0;
@@ -44,14 +47,24 @@ namespace Layout {
         // optional: predict new window's size
         virtual std::optional<Vector2D> predictSizeForNewTarget();
 
+        // optional: allow algorithms to own fullscreen semantics for a target.
+
+        // optional: expose an algorithm-owned FS handler. Each algorithm that wishes to implement its own FS handler must override this method to return its FS handler.
+
+        // FS handler is UP<> to the owning layout so no concerns of ownership
+        virtual WP<Fullscreen::IFullscreenHandler> getFSHandler();
+
         // Impl'd here: focal point for dir
         virtual std::optional<Vector2D> focalPointForDir(SP<ITarget> t, Math::eDirection dir);
 
       protected:
-        IModeAlgorithm() = default;
+        IModeAlgorithm();
 
         WP<CAlgorithm> m_parent;
+        // Layouts that wish to implement custom FS handlers must overwrite this in their constructors
+        const UP<Fullscreen::IFullscreenHandler> m_defaultFullscreenHandler;
 
         friend class Layout::CAlgorithm;
+        friend class Fullscreen::IFullscreenHandler;
     };
 }

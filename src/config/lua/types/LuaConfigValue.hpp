@@ -41,6 +41,10 @@ namespace Config::Lua {
         virtual void                           push(lua_State* s)  = 0;
 
         virtual void                           reset() = 0;
+        virtual Config::INTEGER                asInt();
+        virtual Config::FLOAT                  asFloat();
+        virtual Config::VEC2                   asVec2();
+        virtual Config::STRING                 asString();
         virtual void                           resetSetByUser();
         virtual bool                           setByUser();
         virtual void                           setRefreshBits(Supplementary::PropRefreshBits bits);

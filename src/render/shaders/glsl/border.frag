@@ -27,6 +27,7 @@ uniform float radius;
 uniform float roundingPower;
 uniform vec2  topLeft;
 uniform vec2  fullSize;
+#include "defines.h"
 #include "rounding.glsl"
 #include "CM.glsl"
 #include "border.glsl"
@@ -56,7 +57,7 @@ void main() {
 #endif
 #if USE_TONEMAP
                   ,
-                  maxLuminance, dstMaxLuminance, dstRefLuminance, srcRefLuminance
+                  maxLuminance, dstMaxLuminance, dstRefLuminance, srcRefLuminance, tonemapMode
 #endif
 #if USE_SDR_MOD
                   ,

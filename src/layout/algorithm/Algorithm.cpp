@@ -7,7 +7,7 @@
 #include "../../desktop/view/Window.hpp"
 #include "../../desktop/history/WindowHistoryTracker.hpp"
 #include "../../desktop/state/FocusState.hpp"
-#include "../../helpers/Monitor.hpp"
+#include "../../output/Monitor.hpp"
 #include "../../render/Renderer.hpp"
 
 #include "../../debug/log/Logger.hpp"
@@ -101,30 +101,9 @@ size_t CAlgorithm::floatingTargets() const {
     return m_floatingTargets.size();
 }
 
-void CAlgorithm::recalculate() {
-    m_tiled->recalculate();
-    m_floating->recalculate();
-
-    const auto PWORKSPACE = m_space->workspace();
-    if (!PWORKSPACE)
-        return;
-
-    const auto PMONITOR = PWORKSPACE->m_monitor;
-
-    if (PWORKSPACE->m_hasFullscreenWindow && PMONITOR) {
-        // massive hack from the fullscreen func
-        const auto PFULLWINDOW = PWORKSPACE->getFullscreenWindow();
-
-        if (PFULLWINDOW) {
-            if (PWORKSPACE->m_fullscreenMode == FSMODE_FULLSCREEN) {
-                *PFULLWINDOW->m_realPosition = PMONITOR->m_position;
-                *PFULLWINDOW->m_realSize     = PMONITOR->m_size;
-            } else if (PWORKSPACE->m_fullscreenMode == FSMODE_MAXIMIZED)
-                PFULLWINDOW->layoutTarget()->setPositionGlobal(m_space->workArea());
-        }
-
-        return;
-    }
+void CAlgorithm::recalculate(eRecalculateReason reason) {
+    m_tiled->recalculate(reason);
+    m_floating->recalculate(reason);
 }
 
 void CAlgorithm::recenter(SP<ITarget> t) {

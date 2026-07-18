@@ -18,6 +18,10 @@ static std::string pluginScrollCmd(int delta) {
     return "/eval hl.plugin.test.scroll(" + std::to_string(delta) + ")";
 }
 
+static std::string pluginClickCmd(bool pressed, uint32_t button) {
+    return "/eval hl.plugin.test.click(" + std::to_string(button) + ", " + std::to_string(pressed ? 1 : 0) + ")";
+}
+
 // Because i don't feel like changing someone elses code.
 enum eKeyboardModifierIndex : uint8_t {
     MOD_SHIFT = 1,
@@ -202,7 +206,17 @@ SUBTEST(repeat) {
 }
 
 SUBTEST(keyRepeat) {
-    EXPECT(checkFlag(), false);
+    // wait until flag becomes false (CI timing can vary)
+    bool ok = false;
+    for (int i = 0; i < 20; ++i) {
+        if (!checkFlag()) {
+            ok = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT(ok, true);
+
     EXPECT(getFromSocket("/eval hl.bind('Y', hl.dsp.exec_cmd('touch " + flagFile + "'), { repeating = true })"), "ok");
     EXPECT(getFromSocket("r/eval hl.config({ input = { repeat_delay = 100 } })"), "ok");
     // press keybind
@@ -459,7 +473,42 @@ SUBTEST(submap) {
     press(KEY_P);
     EXPECT_CONTAINS(getFromSocket("/submap"), "default");
 
+    // submap 1 with identical keybind bound inside it
+    press(KEY_U, MOD_META);
+    EXPECT_CONTAINS(getFromSocket("/submap"), "submap1");
+    press(KEY_U, MOD_META);
+    EXPECT_CONTAINS(getFromSocket("/submap"), "submap3");
+    press(KEY_O);
+    Tests::waitUntilWindowsN(4);
+    EXPECT_CONTAINS(getFromSocket("/submap"), "default");
     Tests::killAllWindows();
+}
+
+SUBTEST(submapMouseBinds) {
+    // regression #14856: scroll / mouse-button binds in a non-default submap stopped firing
+    NLog::log("{}Testing mouse binds inside a submap", Colors::GREEN);
+
+    EXPECT(checkFlag(), false);
+    EXPECT(getFromSocket("r/eval hl.config({ binds = { scroll_event_delay = 0 } })"), "ok");
+
+    // enter submap1 (SUPER+U); release with mods cleared so the modless mouse binds match
+    getFromSocket(pluginKeybindCmd(true, 7, 30));
+    getFromSocket(pluginKeybindCmd(false, 0, 30));
+    EXPECT_CONTAINS(getFromSocket("/submap"), "submap1");
+
+    // scroll
+    OK(getFromSocket(pluginScrollCmd(120)));
+    EXPECT(attemptCheckFlag(20, 50), true);
+
+    // mouse-button
+    OK(getFromSocket(pluginClickCmd(true, BTN_LEFT)));
+    OK(getFromSocket(pluginClickCmd(false, BTN_LEFT)));
+    EXPECT(attemptCheckFlag(20, 50), true);
+
+    // reset to default submap
+    getFromSocket(pluginKeybindCmd(true, 0, 33));
+    getFromSocket(pluginKeybindCmd(false, 0, 33));
+    EXPECT_CONTAINS(getFromSocket("/submap"), "default");
 }
 
 SUBTEST(bindsAfterScroll) {
@@ -547,6 +596,14 @@ SUBTEST(perDeviceKeybind) {
     EXPECT(attemptCheckFlag(20, 50), true);
     OK(getFromSocket(pluginKeybindCmd(false, 0, 29)));
     EXPECT(getFromSocket("/eval hl.unbind('SUPER + Y')"), "ok");
+
+    // Tags
+    EXPECT(checkFlag(), false);
+    EXPECT(getFromSocket("/eval hl.bind('SUPER + Y', hl.dsp.exec_cmd('touch " + flagFile + "'), { device = { inclusive = true, list = { 'test-tag' } } })"), "ok");
+    OK(getFromSocket(pluginKeybindCmd(true, 7, 29)));
+    EXPECT(attemptCheckFlag(20, 50), true);
+    OK(getFromSocket(pluginKeybindCmd(false, 0, 29)));
+    EXPECT(getFromSocket("/eval hl.unbind('SUPER + Y')"), "ok");
 }
 
 SUBTEST(unbind) {
@@ -582,6 +639,7 @@ TEST_CASE(keybinds) {
     CALL_SUBTEST(shortcutRepeat);
     CALL_SUBTEST(shortcutRepeatKeyRelease);
     CALL_SUBTEST(submap);
+    CALL_SUBTEST(submapMouseBinds);
     CALL_SUBTEST(submapUniversal);
     CALL_SUBTEST(bindsAfterScroll);
     CALL_SUBTEST(perDeviceKeybind);

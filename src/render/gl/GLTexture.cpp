@@ -74,8 +74,8 @@ CGLTexture::CGLTexture(const Aquamarine::SDMABUFAttrs& attrs, void* image, bool 
 
     m_opaque = isDrmFormatOpaque(attrs.format);
 
-    // #TODO external only formats should be external aswell.
-    // also needs a seperate color shader.
+    // #TODO external only formats should be external as well.
+    // also needs a separate color shader.
     /*if (NFormatUtils::isFormatYUV(attrs.format)) {
         m_target = GL_TEXTURE_EXTERNAL_OES;
         m_type   = TEXTURE_EXTERNAL;
@@ -197,7 +197,9 @@ constexpr std::optional<size_t> CGLTexture::getCacheStateIndex(GLenum pname) {
         case GL_TEXTURE_MAG_FILTER: return TEXTURE_PAR_MAG_FILTER;
         case GL_TEXTURE_MIN_FILTER: return TEXTURE_PAR_MIN_FILTER;
         case GL_TEXTURE_SWIZZLE_R: return TEXTURE_PAR_SWIZZLE_R;
+        case GL_TEXTURE_SWIZZLE_G: return TEXTURE_PAR_SWIZZLE_G;
         case GL_TEXTURE_SWIZZLE_B: return TEXTURE_PAR_SWIZZLE_B;
+        case GL_TEXTURE_SWIZZLE_A: return TEXTURE_PAR_SWIZZLE_A;
         default: return std::nullopt;
     }
 }

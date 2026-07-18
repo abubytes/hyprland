@@ -5,6 +5,7 @@
 #include <vector>
 #include <format>
 #include <expected>
+#include <utility>
 #include <hyprutils/os/FileDescriptor.hpp>
 #include "../SharedDefs.hpp"
 #include "../macros.hpp"
@@ -22,15 +23,12 @@ struct SWorkspaceIDName {
 
 std::string                             absolutePath(const std::string&, const std::string&);
 std::string                             escapeJSONStrings(const std::string& str);
-bool                                    isDirection(const std::string&);
-bool                                    isDirection(const char&);
+bool                                    isDirection(std::string_view);
 SWorkspaceIDName                        getWorkspaceIDNameFromString(const std::string&);
 std::optional<std::string>              cleanCmdForWorkspace(const std::string&, std::string);
 float                                   vecToRectDistanceSquared(const Vector2D& vec, const Vector2D& p1, const Vector2D& p2);
 std::string                             execAndGet(const char*);
 int64_t                                 getPPIDof(int64_t pid);
-std::expected<int64_t, std::string>     configStringToInt(const std::string&);
-Vector2D                                configStringToVector2D(const std::string&);
 std::optional<float>                    getPlusMinusKeywordResult(std::string in, float relative);
 double                                  normalizeAngleRad(double ang);
 std::vector<SCallstackFrameInfo>        getBacktrace();
@@ -48,8 +46,5 @@ bool                                    truthy(const std::string& str);
 
 template <typename... Args>
 [[deprecated("use std::format instead")]] std::string getFormat(std::format_string<Args...> fmt, Args&&... args) {
-    // no need for try {} catch {} because std::format_string<Args...> ensures that vformat never throw std::format_error
-    // because any suck format specifier will cause a compilation error
-    // this is actually what std::format in stdlib does
-    return std::vformat(fmt.get(), std::make_format_args(args...));
+    return std::format(fmt, std::forward<Args>(args)...);
 }

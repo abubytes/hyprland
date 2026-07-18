@@ -4,9 +4,10 @@
 #include "LuaGroup.hpp"
 #include "LuaObjectHelpers.hpp"
 
+#include "../../../managers/fullscreen/FullscreenController.hpp"
 #include "../../../desktop/Workspace.hpp"
 #include "../../../desktop/view/Group.hpp"
-#include "../../../helpers/Monitor.hpp"
+#include "../../../output/Monitor.hpp"
 #include "../../../layout/space/Space.hpp"
 #include "../../../layout/algorithm/Algorithm.hpp"
 #include "../../../layout/algorithm/TiledAlgorithm.hpp"
@@ -51,7 +52,7 @@ static int workspaceGetWindows(lua_State* L) {
 
     lua_newtable(L);
     int idx = 1;
-    for (auto const& w : g_pCompositor->m_windows) {
+    for (auto const& w : Desktop::windowState()->windows()) {
         if (w->m_workspace == ws) {
             Objects::CLuaWindow::push(L, w);
             lua_rawseti(L, -2, idx++);
@@ -73,7 +74,7 @@ static int workspaceGetGroups(lua_State* L) {
 
     std::vector<Desktop::View::CGroup*> pushedGroups;
 
-    for (auto const& w : g_pCompositor->m_windows) {
+    for (auto const& w : Desktop::windowState()->windows()) {
         if (w->m_workspace != ws || !w->m_group)
             continue;
 
@@ -112,7 +113,7 @@ static int workspaceIndex(lua_State* L) {
         else
             lua_pushnil(L);
     } else if (key == "windows")
-        lua_pushinteger(L, sc<lua_Integer>(ws->getWindows()));
+        lua_pushinteger(L, sc<lua_Integer>(ws->getWindowCount()));
     else if (key == "visible")
         lua_pushboolean(L, ws->isVisible());
     else if (key == "special")
@@ -123,20 +124,20 @@ static int workspaceIndex(lua_State* L) {
     } else if (key == "has_urgent")
         lua_pushboolean(L, ws->hasUrgentWindow());
     else if (key == "fullscreen_mode")
-        lua_pushinteger(L, sc<lua_Integer>(ws->m_fullscreenMode));
+        lua_pushinteger(L, sc<lua_Integer>(Fullscreen::controller()->getFullscreenModes(ws).internal));
     else if (key == "has_fullscreen")
-        lua_pushboolean(L, ws->m_hasFullscreenWindow);
+        lua_pushboolean(L, Fullscreen::controller()->hasFullscreen(ws));
     else if (key == "is_persistent")
         lua_pushboolean(L, ws->isPersistent());
     else if (key == "is_empty")
-        lua_pushboolean(L, ws->getWindows() == 0);
+        lua_pushboolean(L, ws->getWindowCount() == 0);
     else if (key == "config_name")
         lua_pushstring(L, ws->getConfigName().c_str());
     else if (key == "tiled_layout") {
         std::string layoutName = "unknown";
         if (ws->m_space && ws->m_space->algorithm() && ws->m_space->algorithm()->tiledAlgo()) {
             const auto& TILED_ALGO = ws->m_space->algorithm()->tiledAlgo();
-            layoutName             = Layout::Supplementary::algoMatcher()->getNameForTiledAlgo(&typeid(*TILED_ALGO.get()));
+            layoutName             = Layout::Supplementary::algoMatcher()->getNameForTiledAlgo(TILED_ALGO.get());
         }
         lua_pushstring(L, layoutName.c_str());
     } else if (key == "last_window") {
@@ -146,7 +147,7 @@ static int workspaceIndex(lua_State* L) {
         else
             lua_pushnil(L);
     } else if (key == "fullscreen_window") {
-        const auto fsWindow = ws->getFullscreenWindow();
+        const auto fsWindow = Fullscreen::controller()->getFullscreenWindow(ws);
         if (fsWindow)
             Objects::CLuaWindow::push(L, fsWindow);
         else
@@ -168,6 +169,12 @@ void Objects::CLuaWorkspace::setup(lua_State* L) {
 }
 
 void Objects::CLuaWorkspace::push(lua_State* L, PHLWORKSPACE ws) {
+    new (lua_newuserdata(L, sizeof(PHLWORKSPACEREF))) PHLWORKSPACEREF(ws ? ws->m_self : nullptr);
+    luaL_getmetatable(L, MT);
+    lua_setmetatable(L, -2);
+}
+
+void Objects::CLuaWorkspace::push(lua_State* L, PHLWORKSPACEREF ws) {
     new (lua_newuserdata(L, sizeof(PHLWORKSPACEREF))) PHLWORKSPACEREF(ws ? ws->m_self : nullptr);
     luaL_getmetatable(L, MT);
     lua_setmetatable(L, -2);

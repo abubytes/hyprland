@@ -4,7 +4,8 @@
 #include "XDGShell.hpp"
 #include "core/Compositor.hpp"
 #include "core/Output.hpp"
-#include "../helpers/Monitor.hpp"
+#include "../output/Monitor.hpp"
+#include "../state/MonitorState.hpp"
 
 void CLayerShellResource::SState::reset() {
     anchor        = 0;
@@ -44,7 +45,7 @@ CLayerShellResource::CLayerShellResource(SP<CZwlrLayerSurfaceV1> resource_, SP<C
         m_current           = m_pending;
         m_pending.committed = 0;
 
-        bool attachedBuffer = m_surface->m_current.texture;
+        bool attachedBuffer = !!m_surface->m_current.texture;
 
         if (attachedBuffer && !m_configured) {
             m_surface->error(-1, "layerSurface was not configured, but a buffer was attached");
@@ -219,10 +220,22 @@ void CLayerShellProtocol::destroyResource(CLayerShellResource* surf) {
 }
 
 void CLayerShellProtocol::onGetLayerSurface(CZwlrLayerShellV1* pMgr, uint32_t id, wl_resource* surface, wl_resource* output, zwlrLayerShellV1Layer layer, std::string namespace_) {
-    const auto CLIENT   = pMgr->client();
-    const auto OUTPUTM  = output ? CWLOutputResource::fromResource(output)->m_monitor.lock() : nullptr;
-    const auto PMONITOR = OUTPUTM && OUTPUTM->isVirtual() ? OUTPUTM : (OUTPUTM ? g_pCompositor->getPrimaryLogicalMonitor(OUTPUTM) : nullptr);
-    auto       SURF     = CWLSurfaceResource::fromResource(surface);
+    const auto CLIENT = pMgr->client();
+
+    PHLMONITOR PMONITOR;
+    if (output) {
+        const auto OUTPUT = CWLOutputResource::fromResource(output);
+        if UNLIKELY (!OUTPUT) {
+            pMgr->error(-1, "Invalid output");
+            return;
+        }
+
+        const auto OUTPUTM = OUTPUT->m_monitor.lock();
+        // split-monitor: a virtual output is used directly, a physical one resolves to its primary logical head
+        PMONITOR           = OUTPUTM && OUTPUTM->isVirtual() ? OUTPUTM : (OUTPUTM ? State::monitorState()->getPrimaryLogicalMonitor(OUTPUTM) : nullptr);
+    }
+
+    auto SURF = CWLSurfaceResource::fromResource(surface);
 
     if UNLIKELY (!SURF) {
         pMgr->error(-1, "Invalid surface");
@@ -248,7 +261,16 @@ void CLayerShellProtocol::onGetLayerSurface(CZwlrLayerShellV1* pMgr, uint32_t id
     }
 
     SURF->m_role = makeShared<CLayerShellRole>(RESOURCE);
-    g_pCompositor->m_layers.emplace_back(Desktop::View::CLayerSurface::create(RESOURCE));
+    Desktop::View::CLayerSurface::create(RESOURCE);
+
+    if (PMONITOR) {
+        const auto PSURFACE = Desktop::View::CWLSurface::fromResource(SURF);
+
+        if (PSURFACE) {
+            PSURFACE->sendScale(PMONITOR->m_scale);
+            PSURFACE->sendTransform(PMONITOR->m_transform);
+        }
+    }
 
     LOGM(Log::DEBUG, "New wlr_layer_surface {:x}", (uintptr_t)RESOURCE.get());
 }
