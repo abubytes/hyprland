@@ -204,6 +204,7 @@
 ---| "group.groupbar.col.inactive"
 ---| "group.groupbar.col.locked_active"
 ---| "group.groupbar.col.locked_inactive"
+---| "group.groupbar.disable_when_only"
 ---| "group.groupbar.enabled"
 ---| "group.groupbar.font_family"
 ---| "group.groupbar.font_size"
@@ -297,6 +298,8 @@
 ---| "input.touchpad.tap_to_click"
 ---| "input.virtualkeyboard.release_pressed_on_close"
 ---| "input.virtualkeyboard.share_states"
+---| "input_capture.capture_modifiers"
+---| "input_capture.enforce_barriers"
 ---| "layout.single_window_aspect_ratio"
 ---| "layout.single_window_aspect_ratio_tolerance"
 ---| "master.allow_small_split"
@@ -334,6 +337,7 @@
 ---| "misc.focus_on_activate"
 ---| "misc.font_family"
 ---| "misc.force_default_wallpaper"
+---| "misc.initial_workspace_token_timeout"
 ---| "misc.initial_workspace_tracking"
 ---| "misc.key_press_enables_dpms"
 ---| "misc.layers_hog_keyboard_focus"
@@ -345,6 +349,7 @@
 ---| "misc.on_focus_under_fullscreen"
 ---| "misc.render_unfocused_fps"
 ---| "misc.screencopy_force_8b"
+---| "misc.session_lock_blur"
 ---| "misc.session_lock_xray"
 ---| "misc.size_limits_tiled"
 ---| "misc.splash_font_family"
@@ -444,6 +449,7 @@ local __HL_LayoutProvider = {}
 ---@field description? string
 ---@field desc? string
 ---@field device? {inclusive?: boolean, list?: string[]}
+---@field allow_input_capture? boolean
 local __HL_BindOptions = {}
 
 ---@class HL.TimerOptions
@@ -630,13 +636,14 @@ local __HL_Group = {}
 ---@field remove fun(self: HL.Keybind, ...): any
 ---@field set_enabled fun(self: HL.Keybind, ...): any
 ---@field unbind fun(self: HL.Keybind, ...): any
+---@field allow_input_capture boolean|nil
 ---@field arg string
 ---@field auto_consuming boolean
 ---@field catchall boolean
 ---@field click boolean
 ---@field description any
 ---@field device_inclusive boolean
----@field devices nil
+---@field devices any
 ---@field display_key string
 ---@field dont_inhibit boolean
 ---@field drag boolean
@@ -737,7 +744,7 @@ local __HL_Timer = {}
 
 ---@class HL.Window
 ---@field accepts_input boolean
----@field active boolean|nil
+---@field active boolean
 ---@field address string
 ---@field allowed_over_fullscreen boolean
 ---@field at integer|table
@@ -763,6 +770,7 @@ local __HL_Timer = {}
 ---@field stable_id integer
 ---@field swallowing HL.Window|nil
 ---@field tags string|table
+---@field tearing_hint boolean|nil
 ---@field title string
 ---@field visible boolean
 ---@field workspace HL.Workspace|nil
@@ -866,6 +874,7 @@ local __HL_API = {}
 ---@field layout fun(...): HL.Dispatcher
 ---@field no_op fun(...): HL.Dispatcher
 ---@field pass fun(...): HL.Dispatcher
+---@field release_input_capture fun(...): HL.Dispatcher
 ---@field send_key_state fun(...): HL.Dispatcher
 ---@field send_shortcut fun(...): HL.Dispatcher
 ---@field submap fun(...): HL.Dispatcher
@@ -1108,6 +1117,7 @@ hl = {}
 ---@field ['group.groupbar.col.inactive'] string|HL.Gradient
 ---@field ['group.groupbar.col.locked_active'] string|HL.Gradient
 ---@field ['group.groupbar.col.locked_inactive'] string|HL.Gradient
+---@field ['group.groupbar.disable_when_only'] boolean
 ---@field ['group.groupbar.enabled'] boolean
 ---@field ['group.groupbar.font_family'] string
 ---@field ['group.groupbar.font_size'] integer|boolean
@@ -1201,6 +1211,8 @@ hl = {}
 ---@field ['input.touchpad.tap_to_click'] boolean
 ---@field ['input.virtualkeyboard.release_pressed_on_close'] boolean
 ---@field ['input.virtualkeyboard.share_states'] integer|boolean
+---@field ['input_capture.capture_modifiers'] boolean
+---@field ['input_capture.enforce_barriers'] boolean
 ---@field ['layout.single_window_aspect_ratio'] HL.Vec2Like
 ---@field ['layout.single_window_aspect_ratio_tolerance'] number|boolean
 ---@field ['master.allow_small_split'] boolean
@@ -1238,6 +1250,7 @@ hl = {}
 ---@field ['misc.focus_on_activate'] boolean
 ---@field ['misc.font_family'] string
 ---@field ['misc.force_default_wallpaper'] integer|boolean
+---@field ['misc.initial_workspace_token_timeout'] integer|boolean
 ---@field ['misc.initial_workspace_tracking'] integer|boolean
 ---@field ['misc.key_press_enables_dpms'] boolean
 ---@field ['misc.layers_hog_keyboard_focus'] boolean
@@ -1249,6 +1262,7 @@ hl = {}
 ---@field ['misc.on_focus_under_fullscreen'] integer|boolean
 ---@field ['misc.render_unfocused_fps'] integer|boolean
 ---@field ['misc.screencopy_force_8b'] boolean
+---@field ['misc.session_lock_blur'] boolean
 ---@field ['misc.session_lock_xray'] boolean
 ---@field ['misc.size_limits_tiled'] boolean
 ---@field ['misc.splash_font_family'] string
@@ -1311,6 +1325,7 @@ local __HL_ConfigValueTypes = {}
 ---@field master? HL.ConfigOpt.Master
 ---@field scrolling? HL.ConfigOpt.Scrolling
 ---@field experimental? HL.ConfigOpt.Experimental
+---@field input_capture? HL.ConfigOpt.InputCapture
 ---@field quirks? HL.ConfigOpt.Quirks
 
 ---@class HL.ConfigOpt.General
@@ -1521,6 +1536,7 @@ local __HL_ConfigValueTypes = {}
 
 ---@class HL.ConfigOpt.Group.Groupbar
 ---@field enabled? boolean
+---@field disable_when_only? boolean
 ---@field font_family? string
 ---@field font_weight_active? integer|string
 ---@field font_weight_inactive? integer|string
@@ -1581,11 +1597,13 @@ local __HL_ConfigValueTypes = {}
 ---@field mouse_move_focuses_monitor? boolean
 ---@field allow_session_lock_restore? boolean
 ---@field session_lock_xray? boolean
+---@field session_lock_blur? boolean
 ---@field background_color? string
 ---@field close_special_on_empty? boolean
 ---@field on_focus_under_fullscreen? integer|boolean
 ---@field exit_window_retains_fullscreen? boolean
 ---@field initial_workspace_tracking? integer|boolean
+---@field initial_workspace_token_timeout? integer|boolean
 ---@field middle_click_paste? boolean
 ---@field render_unfocused_fps? integer|boolean
 ---@field disable_xdg_env_checks? boolean
@@ -1744,6 +1762,10 @@ local __HL_ConfigValueTypes = {}
 
 ---@class HL.ConfigOpt.Experimental
 ---@field wp_cm_1_2? boolean
+
+---@class HL.ConfigOpt.InputCapture
+---@field capture_modifiers? boolean
+---@field enforce_barriers? boolean
 
 ---@class HL.ConfigOpt.Quirks
 ---@field prefer_hdr? integer|boolean

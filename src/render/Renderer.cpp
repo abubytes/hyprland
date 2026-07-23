@@ -725,8 +725,8 @@ void IHyprRenderer::renderLogicalMonitorForScreencopy(PHLMONITOR pMonitor, const
             if (ls.expired() || !ls->aliveAndVisible())
                 continue;
 
-            const auto POS  = ls->m_realPosition->value();
-            const auto SIZE = ls->m_realSize->value();
+            const auto POS  = ls->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+            const auto SIZE = ls->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
             Log::logger->log(Log::TRACE, "[SSDBG] renderLogical layer mon={} ns={} layer={} pos={} size={} geom={} {} {} {} mapped={}", pMonitor->m_name, ls->m_namespace,
                              sc<int>(ls->m_layer), POS, SIZE, ls->m_geometry.x, ls->m_geometry.y, ls->m_geometry.w, ls->m_geometry.h, ls->m_mapped);
         }
@@ -737,7 +737,8 @@ void IHyprRenderer::renderLogicalMonitorForScreencopy(PHLMONITOR pMonitor, const
             continue;
 
         Log::logger->log(Log::TRACE, "[SSDBG] renderLogical window mon={} title={} winMon={} pos={} size={} visible={} mapped={} hidden={} floating={} pinned={} fullscreen={}",
-                         pMonitor->m_name, w->m_title, w->m_monitor ? w->m_monitor->m_name : "<none>", w->m_realPosition->value(), w->m_realSize->value(), w->visibleOnMonitor(pMonitor),
+                         pMonitor->m_name, w->m_title, w->m_monitor ? w->m_monitor->m_name : "<none>", w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT),
+                         w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT), w->visibleOnMonitor(pMonitor),
                          w->m_isMapped, w->isHidden(), w->m_isFloating, w->m_pinned, Fullscreen::controller()->isFullscreen(w));
     }
 
