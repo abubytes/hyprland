@@ -229,6 +229,7 @@ void IElementRenderer::drawSurface(WP<CSurfacePassElement> element, const CRegio
         if (g_pHyprRenderer->m_screencopyDebugActive)
             Log::logger->log(Log::TRACE, "[SSDBG] element drawSurface skip no-texture mon={} kind={} name={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
                              m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"), m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"));
+        element->discard();
         return;
     }
 
@@ -241,6 +242,7 @@ void IElementRenderer::drawSurface(WP<CSurfacePassElement> element, const CRegio
             Log::logger->log(Log::TRACE, "[SSDBG] element drawSurface skip bad-texture mon={} kind={} name={} texSize={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
                              m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"), m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"),
                              TEXTURE->m_size);
+        element->discard();
         return;
     }
 
@@ -273,8 +275,8 @@ void IElementRenderer::drawSurface(WP<CSurfacePassElement> element, const CRegio
     const bool MISALIGNEDFSV1 = std::floor(m_data.pMonitor->m_scale) != m_data.pMonitor->m_scale /* Fractional */ && m_data.surface->m_current.scale == 1 /* fs protocol */ &&
         windowBox.size() != m_data.surface->m_current.bufferSize /* misaligned */ && DELTALESSTHAN(windowBox.width, m_data.surface->m_current.bufferSize.x, 3) &&
         DELTALESSTHAN(windowBox.height, m_data.surface->m_current.bufferSize.y, 3) /* off by one-or-two */ &&
-        (!m_data.pWindow || (!m_data.pWindow->m_realSize->isBeingAnimated() && !INTERACTIVERESIZEINPROGRESS)) /* not window or not animated/resizing */ &&
-        (!m_data.pLS || (!m_data.pLS->m_realSize->isBeingAnimated())); /* not LS or not animated */
+        (!m_data.pWindow || (!m_data.pWindow->sizeAnimation()->isBeingAnimated() && !INTERACTIVERESIZEINPROGRESS)) /* not window or not animated/resizing */ &&
+        (!m_data.pLS || (!m_data.pLS->sizeAnimation()->isBeingAnimated())); /* not LS or not animated */
 
     calculateUVForSurface(m_data.pWindow, m_data.surface, m_data.pMonitor->m_self.lock(), m_data.mainSurface, windowBox.size(), PROJSIZEUNSCALED, MISALIGNEDFSV1);
 
@@ -285,6 +287,7 @@ void IElementRenderer::drawSurface(WP<CSurfacePassElement> element, const CRegio
             Log::logger->log(Log::TRACE, "[SSDBG] element drawSurface skip visible-cancel mon={} kind={} name={} box={} {} {} {}",
                              m_data.pMonitor ? m_data.pMonitor->m_name : "<none>", m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"),
                              m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"), windowBox.x, windowBox.y, windowBox.w, windowBox.h);
+        element->discard();
         return;
     }
 
@@ -411,6 +414,9 @@ void IElementRenderer::drawSurface(WP<CSurfacePassElement> element, const CRegio
     }
 
     g_pHyprRenderer->blend(true);
+
+    if (!g_pHyprRenderer->m_bBlockSurfaceFeedback)
+        element->m_data.surface->presentFeedback(element->m_data.when, element->m_data.pMonitor->m_self.lock());
 };
 
 void IElementRenderer::preDrawSurface(WP<CSurfacePassElement> element, const CRegion& damage) {
@@ -421,9 +427,6 @@ void IElementRenderer::preDrawSurface(WP<CSurfacePassElement> element, const CRe
     m_renderData.currentWindow = element->m_data.pWindow;
 
     drawSurface(element, damage);
-
-    if (!g_pHyprRenderer->m_bBlockSurfaceFeedback)
-        element->m_data.surface->presentFeedback(element->m_data.when, element->m_data.pMonitor->m_self.lock());
 
     // add async (dmabuf) buffers to usedBuffers so we can handle release later
     // sync (shm) buffers will be released in commitState, so no need to track them here

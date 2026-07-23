@@ -16,13 +16,6 @@ CWindowState::CWindowState() {
 
         m_windows.emplace_back(WINDOW);
     });
-
-    m_listeners.viewDestroy = Event::bus()->m_events.view.destroy.listen([this](const Event::SViewDestroyEvent& event) {
-        if (event.type != View::VIEW_TYPE_WINDOW)
-            return;
-
-        std::erase_if(m_windows, [&](auto& x) { return !x || rc<uintptr_t>(x.get()) == event.address; });
-    });
 }
 
 void CWindowState::removeSafe(PHLWINDOW w) {

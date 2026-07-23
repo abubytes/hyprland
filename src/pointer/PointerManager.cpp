@@ -8,6 +8,7 @@
 #include "../protocols/IdleNotify.hpp"
 #include "../protocols/core/Compositor.hpp"
 #include "../protocols/core/Seat.hpp"
+#include "../protocols/InputCapture.hpp"
 #include "debug/log/Logger.hpp"
 #include "../managers/eventLoop/EventLoopManager.hpp"
 #include "../render/pass/ClearPassElement.hpp"
@@ -571,10 +572,9 @@ SP<Aquamarine::IBuffer> CPointerManager::renderHWCursorBuffer(SP<CPointerManager
         const auto TR = state->monitor->m_transform;
 
         // we need to scale the cursor to the right size, because it might not be (esp with XCursor)
-        const auto SCALEDCURSORSIZE = m_currentCursorImage.size / m_currentCursorImage.scale * state->monitor->m_scale;
-        const auto SCALE            = texture->m_size / SCALEDCURSORSIZE;
+        const auto SCALE = texture->m_size / (m_currentCursorImage.size / m_currentCursorImage.scale * state->monitor->m_scale);
         const auto SX = SCALE.x, SY = SCALE.y;
-        const auto CW = SCALEDCURSORSIZE.x, CH = SCALEDCURSORSIZE.y;
+        const auto BW = sc<double>(DMABUF.size.x), BH = sc<double>(DMABUF.size.y);
 
         // Cairo pattern matrix maps destination coords to source coords (inverse of visual transform).
         // x_src = xx * x_dst + xy * y_dst + x0
@@ -583,13 +583,13 @@ SP<Aquamarine::IBuffer> CPointerManager::renderHWCursorBuffer(SP<CPointerManager
         switch (TR) {
             case WL_OUTPUT_TRANSFORM_NORMAL:
             default: cairo_matrix_init(&matrixPre, SX, 0, 0, SY, 0, 0); break;
-            case WL_OUTPUT_TRANSFORM_90: cairo_matrix_init(&matrixPre, 0, SY, -SX, 0, SX * CW, 0); break;
-            case WL_OUTPUT_TRANSFORM_180: cairo_matrix_init(&matrixPre, -SX, 0, 0, -SY, SX * CW, SY * CH); break;
-            case WL_OUTPUT_TRANSFORM_270: cairo_matrix_init(&matrixPre, 0, -SY, SX, 0, 0, SY * CH); break;
-            case WL_OUTPUT_TRANSFORM_FLIPPED: cairo_matrix_init(&matrixPre, -SX, 0, 0, SY, SX * CW, 0); break;
+            case WL_OUTPUT_TRANSFORM_90: cairo_matrix_init(&matrixPre, 0, SY, -SX, 0, SX * BW, 0); break;
+            case WL_OUTPUT_TRANSFORM_180: cairo_matrix_init(&matrixPre, -SX, 0, 0, -SY, SX * BW, SY * BH); break;
+            case WL_OUTPUT_TRANSFORM_270: cairo_matrix_init(&matrixPre, 0, -SY, SX, 0, 0, SY * BH); break;
+            case WL_OUTPUT_TRANSFORM_FLIPPED: cairo_matrix_init(&matrixPre, -SX, 0, 0, SY, SX * BW, 0); break;
             case WL_OUTPUT_TRANSFORM_FLIPPED_90: cairo_matrix_init(&matrixPre, 0, SY, SX, 0, 0, 0); break;
-            case WL_OUTPUT_TRANSFORM_FLIPPED_180: cairo_matrix_init(&matrixPre, SX, 0, 0, -SY, 0, SY * CH); break;
-            case WL_OUTPUT_TRANSFORM_FLIPPED_270: cairo_matrix_init(&matrixPre, 0, -SY, -SX, 0, SX * CW, SY * CH); break;
+            case WL_OUTPUT_TRANSFORM_FLIPPED_180: cairo_matrix_init(&matrixPre, SX, 0, 0, -SY, 0, SY * BH); break;
+            case WL_OUTPUT_TRANSFORM_FLIPPED_270: cairo_matrix_init(&matrixPre, 0, -SY, -SX, 0, SX * BW, SY * BH); break;
         }
 
         cairo_pattern_set_matrix(PATTERNPRE, &matrixPre);
@@ -707,12 +707,9 @@ Vector2D CPointerManager::transformedHotspot(PHLMONITOR pMonitor) {
     if (!pMonitor->m_cursorSwapchain)
         return {}; // doesn't matter, we have no hw cursor, and this is only for hw cursors
 
-    const auto SCALEDCURSORSIZE = m_currentCursorImage.size / m_currentCursorImage.scale * pMonitor->m_scale;
-
-    // A hotspot identifies a pixel, not a zero-sized point. Transforming a
-    // zero-sized box produces a one-past-the-edge coordinate for rotations.
-    return CBox{m_currentCursorImage.hotspot * pMonitor->m_scale, {1, 1}}
-        .transform(Math::wlTransformToHyprutils(Math::invertTransform(pMonitor->m_transform)), SCALEDCURSORSIZE.x, SCALEDCURSORSIZE.y)
+    return CBox{m_currentCursorImage.hotspot * pMonitor->m_scale, {0, 0}}
+        .transform(Math::wlTransformToHyprutils(Math::invertTransform(pMonitor->m_transform)), pMonitor->m_cursorSwapchain->currentOptions().size.x,
+                   pMonitor->m_cursorSwapchain->currentOptions().size.y)
         .pos();
 }
 
@@ -837,6 +834,12 @@ void CPointerManager::warpTo(const Vector2D& logical) {
 void CPointerManager::move(const Vector2D& deltaLogical) {
     const auto oldPos = m_pointerPos;
     auto       newPos = oldPos + Vector2D{std::isnan(deltaLogical.x) ? 0.0 : deltaLogical.x, std::isnan(deltaLogical.y) ? 0.0 : deltaLogical.y};
+
+    if (!g_pInputManager->isLocked())
+        PROTO::inputCapture->motion(newPos, deltaLogical);
+
+    if (PROTO::inputCapture->isCaptured())
+        return;
 
     warpTo(newPos);
 }
