@@ -737,8 +737,8 @@ void IHyprRenderer::renderLogicalMonitorForScreencopy(PHLMONITOR pMonitor, const
             continue;
 
         Log::logger->log(Log::TRACE, "[SSDBG] renderLogical window mon={} title={} winMon={} pos={} size={} visible={} mapped={} hidden={} floating={} pinned={} fullscreen={}",
-                         pMonitor->m_name, w->m_title, w->m_monitor ? w->m_monitor->m_name : "<none>",
-                         w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT), w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT), w->visibleOnMonitor(pMonitor),
+                         pMonitor->m_name, w->m_title, w->m_monitor ? w->m_monitor->m_name : "<none>", w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT),
+                         w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT), w->visibleOnMonitor(pMonitor),
                          w->m_isMapped, w->isHidden(), w->m_isFloating, w->m_pinned, Fullscreen::controller()->isFullscreen(w));
     }
 
@@ -1333,13 +1333,11 @@ void IHyprRenderer::renderIMEPopup(CInputPopup* pPopup, PHLMONITOR pMonitor, con
 }
 
 void IHyprRenderer::renderSessionLockSurface(WP<SSessionLockSurface> pSurface, PHLMONITOR pRenderMonitor, PHLMONITOR pLogicalMonitor, const Time::steady_tp& time) {
-    if (!pRenderMonitor || !pLogicalMonitor)
-        return;
-
-    // Upstream session-lock blur/xray options, with fork's split render/logical monitors
-    // so virtual (split) outputs can composite the lock surface correctly.
     static auto PSESSIONLOCKXRAY = CConfigValue<Config::BOOL>("misc:session_lock_xray");
     static auto PSESSIONLOCKBLUR = CConfigValue<Config::BOOL>("misc:session_lock_blur");
+
+    if (!pRenderMonitor || !pLogicalMonitor)
+        return;
 
     CSurfacePassElement::SRenderData renderdata = {pRenderMonitor, time, pLogicalMonitor->m_position, pLogicalMonitor->m_position};
 

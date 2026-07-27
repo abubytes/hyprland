@@ -228,8 +228,7 @@ void IElementRenderer::drawSurface(WP<CSurfacePassElement> element, const CRegio
     if (!m_data.texture) {
         if (g_pHyprRenderer->m_screencopyDebugActive)
             Log::logger->log(Log::TRACE, "[SSDBG] element drawSurface skip no-texture mon={} kind={} name={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
-                             m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"),
-                             m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"));
+                             m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"), m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"));
         element->discard();
         return;
     }
@@ -241,8 +240,8 @@ void IElementRenderer::drawSurface(WP<CSurfacePassElement> element, const CRegio
     if (!TEXTURE->ok()) {
         if (g_pHyprRenderer->m_screencopyDebugActive)
             Log::logger->log(Log::TRACE, "[SSDBG] element drawSurface skip bad-texture mon={} kind={} name={} texSize={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
-                             m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"),
-                             m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"), TEXTURE->m_size);
+                             m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"), m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"),
+                             TEXTURE->m_size);
         element->discard();
         return;
     }

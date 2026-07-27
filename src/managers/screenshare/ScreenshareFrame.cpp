@@ -285,8 +285,7 @@ bool CScreenshareFrame::hasNoScreenShareOverlays(PHLMONITOR pMonitor) {
         const auto renderOffset = PWORKSPACE && !w->m_pinned ? PWORKSPACE->m_renderOffset->value() : Vector2D{};
         const auto REALSIZE     = w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
         const auto REALPOS      = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + renderOffset;
-        const auto BOX          = noScreenShareBoxForMonitor(pMonitor, m_session->m_captureBox,
-                                                             CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)});
+        const auto BOX          = noScreenShareBoxForMonitor(pMonitor, m_session->m_captureBox, CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)});
 
         if (boxTouchesBuffer(BOX, m_bufferSize))
             return true;
@@ -360,8 +359,7 @@ void CScreenshareFrame::renderNoScreenShareOverlays(PHLMONITOR pMonitor) {
         const auto renderOffset     = PWORKSPACE && !w->m_pinned ? PWORKSPACE->m_renderOffset->value() : Vector2D{};
         const auto REALSIZE         = w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
         const auto REALPOS          = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + renderOffset;
-        const auto noScreenShareBox = noScreenShareBoxForMonitor(pMonitor, m_session->m_captureBox,
-                                                                 CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)});
+        const auto noScreenShareBox = noScreenShareBoxForMonitor(pMonitor, m_session->m_captureBox, CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)});
 
         // Rounding can leak pixels when a region capture shifts the mask relative to the output.
         const auto dontRound     = m_session->m_captureBox.pos() != Vector2D() || Fullscreen::controller()->isFullscreen(w, Fullscreen::FSMODE_FULLSCREEN);
