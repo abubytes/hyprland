@@ -55,16 +55,18 @@ bool CPresentationFeedback::good() {
 }
 
 void CPresentationFeedback::sendQueued(WP<CQueuedPresentationData> data, const timespec& when, uint32_t untilRefreshNs, uint64_t seq, uint32_t reportedFlags) {
-    const auto DATA = data.lock();
-    if (!DATA || !good()) {
+    // `data` is a WP over a CUniquePointer (m_queue entries). That kind of weak
+    // pointer is NOT lockable — hyprutils asserts/terminates on data.lock().
+    // Use operator-> / valid() only. m_monitor is PHLMONITORREF (WP over SP) and may lock.
+    if (!data || !good()) {
         m_done = true;
         return;
     }
 
     auto client = m_resource->client();
 
-    const auto MONITOR   = DATA->m_monitor.lock();
-    const bool PRESENTED = DATA->m_wasPresented && MONITOR && MONITOR->m_output;
+    const auto MONITOR   = data->m_monitor.lock();
+    const bool PRESENTED = data->m_wasPresented && MONITOR && MONITOR->m_output;
 
     // Presentation queue entries can outlive the monitor they were attached to
     // during DPMS, hotplug, or screencopy teardown. Without a monitor we cannot
@@ -81,7 +83,7 @@ void CPresentationFeedback::sendQueued(WP<CQueuedPresentationData> data, const t
         uint32_t flags = 0;
         if (!MONITOR->m_tearingState.activelyTearing)
             flags |= WP_PRESENTATION_FEEDBACK_KIND_VSYNC;
-        if (DATA->m_zeroCopy)
+        if (data->m_zeroCopy)
             flags |= WP_PRESENTATION_FEEDBACK_KIND_ZERO_COPY;
         if (reportedFlags & Aquamarine::IOutput::AQ_OUTPUT_PRESENT_HW_CLOCK)
             flags |= WP_PRESENTATION_FEEDBACK_KIND_HW_CLOCK;

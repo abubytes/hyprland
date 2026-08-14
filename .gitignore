@@ -13,6 +13,9 @@ hyprland.pc
 _deps
 
 build/
+.hyprdeps/
+.hyprdeps-src/
+build-backups/
 result*
 /.pre-commit-config.yaml
 /.vscode/

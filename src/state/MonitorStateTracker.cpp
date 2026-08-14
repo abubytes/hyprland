@@ -10,5 +10,8 @@ CMonitorQuery IMonitorStateTracker::query() const {
 }
 
 bool IMonitorStateTracker::contains(PHLMONITOR monitor) const {
-    return std::ranges::contains(allMonitors(), monitor);
+    // Logical/virtual (split) monitors live in monitors(), not allMonitors()
+    // (which is only the real physical outputs). Screenshare and other
+    // lifetime checks must accept both.
+    return std::ranges::contains(monitors(), monitor) || std::ranges::contains(allMonitors(), monitor);
 }
