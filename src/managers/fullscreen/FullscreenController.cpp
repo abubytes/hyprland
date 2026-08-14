@@ -1,7 +1,7 @@
 #include "FullscreenController.hpp"
 
 #include "../../managers/fullscreen/handler/FullscreenHandler.hpp"
-#include "../../managers/EventManager.hpp"
+#include "../../ipc/s2/S2.hpp"
 
 #include "../../layout/algorithm/Algorithm.hpp"
 #include "../../layout/algorithm/FloatingAlgorithm.hpp"
@@ -39,7 +39,10 @@ bool CFullscreenController::isFullscreen(const PHLWINDOW window, const std::opti
         if (!FS_WINDOW || !FS_WINDOW->m_target)
             return false;
 
-        if (FS_WINDOW == FS_HANDLER->getFullscreen(covering)->window() && FS_HANDLER->getFullscreenModes(window->m_target).internal == mode)
+        const auto FS_TARGET     = FS_HANDLER->getFullscreen(covering);
+        const auto INTERNAL_MODE = FS_HANDLER->getFullscreenModes(window->m_target).internal;
+
+        if (FS_TARGET && FS_WINDOW == FS_TARGET->window() && INTERNAL_MODE != FSMODE_NONE && (!mode.has_value() || INTERNAL_MODE == mode.value()))
             return true;
         else {
             FS_HANDLER->syncFullscreenTargets();
@@ -75,7 +78,7 @@ SFullscreenMode CFullscreenController::getFullscreenModes(const PHLWINDOW window
     auto fsModes = FS_HANDLER->getFullscreenModes(window->m_target);
 
     /* Error correction - try once*/
-    if (fsModes.internal != FSMODE_NONE && !FS_HANDLER->isFullscreen(window->m_target)) {
+    if (fsModes.internal != FSMODE_NONE && !FS_HANDLER->isFullscreen(window->m_target, std::nullopt, std::nullopt)) {
         FS_HANDLER->syncFullscreenTargets();
         return FS_HANDLER->getFullscreenModes(window->m_target);
     }
@@ -240,10 +243,16 @@ eFullscreenHandler CFullscreenController::getFullscreenHandlerName(const PHLWIND
     if (!window)
         return FULLSCREEN_HANDLER_NONE;
 
-    // IMPORTANT: no layoutHandled value passed -> infinite recursion.
-    const auto LAYOUT_FS_HANDLER = getFsHandler(window, true);
-    // IMPORTANT: no layoutHandled value passed -> infinite recursion.
-    const auto DEFAULT_FS_HANDLER = getFsHandler(window, false);
+    return getFullscreenHandlerName(window, getFsHandlersForWorkspace(window->m_workspace));
+}
+
+eFullscreenHandler CFullscreenController::getFullscreenHandlerName(const PHLWINDOW window, const SFsHandlersForWorkspace& handlers) {
+    if (!window)
+        return FULLSCREEN_HANDLER_NONE;
+
+    // IMPORTANT: don't route through getFsHandler() without a layoutHandled value -> infinite recursion.
+    const auto LAYOUT_FS_HANDLER  = window->m_isFloating ? handlers.FLOATING_FS_HANDLER : handlers.TILED_FS_HANDLER;
+    const auto DEFAULT_FS_HANDLER = window->m_isFloating ? handlers.FLOATING_FS_HANDLER : handlers.TILED_DEFAULT_FS_HANDLER;
 
     if (!LAYOUT_FS_HANDLER || !DEFAULT_FS_HANDLER) {
         Log::logger->log(Log::ERR, "window {} doesn't have FS handler assinged. This should never happen", window->m_title);
@@ -479,7 +488,7 @@ void CFullscreenController::setWindowFullscreenModeInternal(const PHLWINDOW wind
     SPACE->recalculate(FULLSCREEN_REQUEST_RESULT == FULLSCREEN_REQUEST_DEFAULT_HANDLED ? Layout::RECALCULATE_REASON_TOGGLE_DEFAULT_HANDLED_FULLSCREEN :
                                                                                          Layout::RECALCULATE_REASON_TOGGLE_LAYOUT_HANDLED_FULLSCREEN);
 
-    g_pEventManager->postEvent(SHyprIPCEvent{.event = "fullscreen", .data = std::to_string(sc<int>(mode) != FSMODE_NONE)});
+    IPC::Socket2::sock()->postEvent({.event = "fullscreen", .data = std::to_string(sc<int>(mode) != FSMODE_NONE)});
     Event::bus()->m_events.window.fullscreen.emit(window);
 
     window->m_ruleApplicator->propertiesChanged(Desktop::Rule::RULE_PROP_FULLSCREEN | Desktop::Rule::RULE_PROP_FULLSCREENSTATE_CLIENT |
@@ -520,25 +529,42 @@ WP<IFullscreenHandler> CFullscreenController::getFsHandler(const PHLWINDOW windo
     if (!window)
         return nullptr;
 
-    if (!layoutHandled.has_value())
-        layoutHandled = layoutManagedFS(window);
-
     const auto HANDLERS = getFsHandlersForWorkspace(window->m_workspace);
     if (!HANDLERS.TILED_FS_HANDLER || !HANDLERS.TILED_DEFAULT_FS_HANDLER || !HANDLERS.FLOATING_FS_HANDLER)
         return nullptr;
+
+    if (!layoutHandled.has_value()) {
+        const auto FS_HANDLER_NAME = getFullscreenHandlerName(window, HANDLERS);
+
+        if (FS_HANDLER_NAME == FULLSCREEN_HANDLER_NONE)
+            Log::logger->log(Log::ERR, "window {} doesn't have FS handler assinged. This should never happen", window->m_title);
+
+        // If a window is not FS at all, we consider its handler to be layout if it is in a workspace with a layout that implements their custom FS behaviour.
+        layoutHandled = FS_HANDLER_NAME & FULLSCREEN_HANDLER_LAYOUT;
+    }
 
     return (layoutHandled.value() ? (window->m_isFloating ? HANDLERS.FLOATING_FS_HANDLER : HANDLERS.TILED_FS_HANDLER) :
                                     (window->m_isFloating ? HANDLERS.FLOATING_FS_HANDLER : HANDLERS.TILED_DEFAULT_FS_HANDLER));
 }
 
 CFullscreenController::SFsHandlersForWorkspace CFullscreenController::getFsHandlersForWorkspace(const PHLWORKSPACE workspace) const {
-    if (!workspace || !workspace->m_space || !workspace->m_space->algorithm() || !workspace->m_space->algorithm()->floatingAlgo() || !workspace->m_space->algorithm()->tiledAlgo())
+    if (!workspace || !workspace->m_space)
         return {};
 
-    const auto TILED_FS_HANDLER         = workspace->m_space->algorithm()->tiledAlgo()->getFSHandler();
-    const auto TILED_DEFAULT_FS_HANDLER = workspace->m_space->algorithm()->tiledAlgo()->IModeAlgorithm::getFSHandler();
+    const auto ALGO = workspace->m_space->algorithm();
+    if (!ALGO)
+        return {};
 
-    const auto FLOATING_FS_HANDLER = workspace->m_space->algorithm()->floatingAlgo()->getFSHandler();
+    const auto& TILED_ALGO    = ALGO->tiledAlgo();
+    const auto& FLOATING_ALGO = ALGO->floatingAlgo();
+
+    if (!TILED_ALGO || !FLOATING_ALGO)
+        return {};
+
+    const auto TILED_FS_HANDLER         = TILED_ALGO->getFSHandler();
+    const auto TILED_DEFAULT_FS_HANDLER = TILED_ALGO->IModeAlgorithm::getFSHandler();
+
+    const auto FLOATING_FS_HANDLER = FLOATING_ALGO->getFSHandler();
 
     if (!TILED_FS_HANDLER || !TILED_DEFAULT_FS_HANDLER || !FLOATING_FS_HANDLER) {
         Log::logger->log(Log::ERR, "workspace ID:{} doesn't have FS handlers assinged. This should never happen", workspace->m_id);

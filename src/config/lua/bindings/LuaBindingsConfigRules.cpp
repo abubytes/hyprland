@@ -26,13 +26,13 @@
 #include "../../../desktop/rule/windowRule/WindowRule.hpp"
 #include "../../../desktop/rule/windowRule/WindowRuleEffectContainer.hpp"
 #include "../../../layout/LayoutManager.hpp"
+#include "../../../keybinds/Resolver.hpp"
 #include "../../../layout/supplementary/WorkspaceAlgoMatcher.hpp"
 #include "../../../animation/AnimationManager.hpp"
 #include "../../../managers/input/InputManager.hpp"
 #include "../../../managers/input/trackpad/TrackpadGestures.hpp"
 #include "../../../managers/input/trackpad/gestures/CloseGesture.hpp"
 #include "../../../managers/input/trackpad/gestures/CursorZoomGesture.hpp"
-#include "../../../managers/input/trackpad/gestures/DispatcherGesture.hpp"
 #include "../../../managers/input/trackpad/gestures/FloatGesture.hpp"
 #include "../../../managers/input/trackpad/gestures/FullscreenGesture.hpp"
 #include "../../../managers/input/trackpad/gestures/LuaFunctionGesture.hpp"
@@ -219,6 +219,8 @@ namespace {
          [](ILuaConfigValue* v, Config::CWorkspaceRule& r) { r.m_decorate = *sc<const Config::BOOL*>(v->data()); }},
         {"no_shadow", []() -> ILuaConfigValue* { return new CLuaConfigBool(false); },
          [](ILuaConfigValue* v, Config::CWorkspaceRule& r) { r.m_noShadow = *sc<const Config::BOOL*>(v->data()); }},
+        {"no_wobble", []() -> ILuaConfigValue* { return new CLuaConfigBool(false); },
+         [](ILuaConfigValue* v, Config::CWorkspaceRule& r) { r.m_noWobble = *sc<const Config::BOOL*>(v->data()); }},
         {"on_created_empty", []() -> ILuaConfigValue* { return new CLuaConfigString(STRVAL_EMPTY); },
          [](ILuaConfigValue* v, Config::CWorkspaceRule& r) { r.m_onCreatedEmptyRunCmd = *sc<const Config::STRING*>(v->data()); }},
         {"default_name", []() -> ILuaConfigValue* { return new CLuaConfigString(STRVAL_EMPTY); },
@@ -450,7 +452,7 @@ static int hlAnimation(lua_State* L) {
         if (!Animation::mgr()->springExists(springName))
             return Internal::configError(L, std::format(R"(hl.animation("{}"): no such spring "{}")", leaf, springName));
 
-        curveName = "spring:" + springName;
+        curveName = std::format("spring:{}", springName);
     } else
         return Internal::configError(L, std::format(R"(hl.animation("{}"): bezier or spring is required)", leaf));
 
@@ -524,9 +526,9 @@ static int hlEnv(lua_State* L) {
     if (dbus) {
         std::string CMD;
 #ifdef USES_SYSTEMD
-        CMD = "systemctl --user import-environment '" + name + "' && hash dbus-update-activation-environment 2>/dev/null && ";
+        CMD = std::format("systemctl --user import-environment '{}' && hash dbus-update-activation-environment 2>/dev/null && ", name);
 #endif
-        CMD += "dbus-update-activation-environment --systemd '" + name + "'";
+        CMD += std::format("dbus-update-activation-environment --systemd '{}'", name);
         if (mgr->isFirstLaunch())
             Config::Supplementary::executor()->addExecOnce({CMD, false});
         else
@@ -879,7 +881,7 @@ static int hlGesture(lua_State* L) {
 
 #undef GET_ACTION_STRING
 
-    uint32_t modMask = 0;
+    Input::ModifierMask modMask = Input::HL_MODIFIER_NONE;
     lua_getfield(L, 1, "mods");
     if (!lua_isnil(L, -1)) {
         CLuaConfigString modsParser("");
@@ -888,7 +890,7 @@ static int hlGesture(lua_State* L) {
             lua_pop(L, 1);
             return Internal::configError(L, std::format("hl.gesture: field \"mods\": {}", modsErr.message));
         }
-        modMask = g_pKeybindManager->stringToModMask(modsParser.parsed());
+        modMask = Keybinds::modMaskFromString(modsParser.parsed());
     }
     lua_pop(L, 1);
 

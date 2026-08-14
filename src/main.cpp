@@ -1,9 +1,9 @@
 #include "defines.hpp"
 #include "debug/log/Logger.hpp"
 #include "Compositor.hpp"
-#include "config/legacy/ConfigManager.hpp"
+#include "config/ConfigManager.hpp"
 #include "init/initHelpers.hpp"
-#include "debug/HyprCtl.hpp"
+#include "ipc/s1/S1.hpp"
 #include "helpers/env/Env.hpp"
 
 #include <csignal>
@@ -149,13 +149,13 @@ int main(int argc, char** argv) {
 
                 return 0;
             } else if (value == "-v" || value == "--version") {
-                std::println("{}", versionRequest(eHyprCtlOutputFormat::FORMAT_NORMAL, ""));
+                std::println("{}", IPC::Socket1::version(IPC::Socket1::eOutputFormat::FORMAT_NORMAL));
                 return 0;
             } else if (value == "--version-json") {
-                std::println("{}", versionRequest(eHyprCtlOutputFormat::FORMAT_JSON, ""));
+                std::println("{}", IPC::Socket1::version(IPC::Socket1::eOutputFormat::FORMAT_JSON));
                 return 0;
             } else if (value == "--systeminfo") {
-                std::println("{}", systemInfoRequest(eHyprCtlOutputFormat::FORMAT_NORMAL, ""));
+                std::println("{}", IPC::Socket1::systemInfo(IPC::Socket1::eOutputFormat::FORMAT_NORMAL));
                 return 0;
             } else if (value == "--verify-config") {
                 verifyConfig = true;
@@ -252,10 +252,9 @@ int main(int argc, char** argv) {
 
 
 )#");
-
-        if (!Env::envEnabled("HYPRLAND_NO_RT"))
-            NInit::gainRealTime();
     }
+
+    NInit::lowerAmbientCaps();
 
     // let's init the compositor.
     // it initializes basic Wayland stuff in the constructor.

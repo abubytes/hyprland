@@ -143,6 +143,11 @@ eScreenshareError CScreenshareFrame::share(SP<IHLBuffer> buffer, const CRegion& 
         return ERROR_NO_BUFFER;
     }
 
+    if UNLIKELY (m_bufferSize != m_session->bufferSize()) {
+        LOGM(Log::ERR, "Client requested sharing with stale buffer constraints");
+        return ERROR_BUFFER_SIZE;
+    }
+
     if UNLIKELY (buffer->size != m_bufferSize) {
         LOGM(Log::ERR, "Client requested sharing to an invalid buffer size");
         return ERROR_BUFFER_SIZE;
@@ -387,9 +392,9 @@ void CScreenshareFrame::renderOverlayCursor(PHLMONITOR pMonitor) {
     if (!m_overlayCursor || !pMonitor)
         return;
 
-    CRegion  fakeDamage = {0, 0, INT16_MAX, INT16_MAX};
+    CRegion  fakeDamage = {0, 0, m_bufferSize.x, m_bufferSize.y};
     Vector2D cursorPos  = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position - m_session->m_captureBox.pos() / pMonitor->m_scale;
-    Pointer::mgr()->renderSoftwareCursorsFor(pMonitor, Time::steadyNow(), fakeDamage, cursorPos, true);
+    Pointer::mgr()->renderSoftwareCursorsFor(pMonitor, Time::steadyNow(), fakeDamage, cursorPos, true, pMonitor->isVirtual());
 }
 
 void CScreenshareFrame::renderMonitor() {
@@ -445,11 +450,12 @@ void CScreenshareFrame::renderMonitor() {
             Log::logger->log(Log::TRACE, "CM: screenshot renderMonitor {} -> {}", TEXTURE->m_imageDescription->value(),
                              g_pHyprRenderer->m_renderData.currentFB->imageDescription()->value());
 
-        // render monitor texture
-        CBox monbox = CBox{{}, SOURCE_MONITOR->m_pixelSize}
-                          .transform(Math::wlTransformToHyprutils(Math::invertTransform(SOURCE_MONITOR->m_transform)), SOURCE_MONITOR->m_pixelSize.x,
-                                     SOURCE_MONITOR->m_pixelSize.y)
-                          .translate(-m_session->m_captureBox.pos()); // vvvv kinda ass-backwards but that's how I designed the renderer... sigh.
+        g_pHyprRenderer->m_renderData.fbSize = m_bufferSize;
+        g_pHyprRenderer->setProjectionType(Render::RPT_EXPORT);
+        g_pHyprRenderer->setViewport(0, 0, m_bufferSize.x, m_bufferSize.y);
+
+        // render monitor texture (normal transform; capture box is already in that space)
+        CBox monbox = CBox{{}, SOURCE_MONITOR->m_transformedSize}.translate(-m_session->m_captureBox.pos());
 
         LOGM(Log::TRACE, "[SSDBG] renderMonitor physical mirror source={} sessionMon={} mirrorBox={} {} {} {} textureSize={}", SOURCE_MONITOR->m_name, PMONITOR->m_name, monbox.x,
              monbox.y, monbox.w, monbox.h, TEXTURE ? TEXTURE->m_size : Vector2D{});
@@ -459,12 +465,11 @@ void CScreenshareFrame::renderMonitor() {
         g_pHyprRenderer->startRenderPass();
         g_pHyprRenderer->draw(
             CTexPassElement::SRenderData{
-                .tex                = TEXTURE,
-                .box                = monbox,
-                .flipEndFrame       = true,
-                .cmBackToSRGB       = !IS_CM_AWARE,
+                .tex          = TEXTURE,
+                .box          = monbox,
+                .cmBackToSRGB = !IS_CM_AWARE,
             },
-            {0, 0, PMONITOR->m_pixelSize.x, PMONITOR->m_pixelSize.y});
+            {0, 0, m_bufferSize.x, m_bufferSize.y});
         g_pHyprRenderer->m_renderData.renderModif.enabled = OLD;
     }
 
@@ -510,15 +515,15 @@ void CScreenshareFrame::renderWindow() {
     if (Desktop::focusState()->window() != m_session->m_window)
         return;
 
-    CRegion fakeDamage = {0, 0, INT16_MAX, INT16_MAX};
+    CRegion fakeDamage = {0, 0, m_bufferSize.x, m_bufferSize.y};
     Pointer::mgr()->renderSoftwareCursorsFor(PMONITOR->m_self.lock(), NOW, fakeDamage,
-                                             g_pInputManager->getMouseCoordsInternal() - PWINDOW->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT), true);
+                                             g_pInputManager->getMouseCoordsInternal() - PWINDOW->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT), true, true);
 }
 
 void CScreenshareFrame::render() {
     const auto PERM = g_pDynamicPermissionManager->clientPermissionMode(m_session->m_client, PERMISSION_TYPE_SCREENCOPY);
 
-    CRegion    frameRegion    = {0, 0, g_pHyprRenderer->m_renderData.pMonitor->m_pixelSize.x, g_pHyprRenderer->m_renderData.pMonitor->m_pixelSize.y};
+    CRegion    frameRegion    = {0, 0, m_bufferSize.x, m_bufferSize.y};
     const auto FRAME_EXTENTS  = frameRegion.getExtents();
     const auto DAMAGE_EXTENTS = m_damage.getExtents();
     LOGM(Log::TRACE, "[SSDBG] render enter type={} mon={} perm={} buffer={} renderMon={} renderPix={} fbSize={} frameRegion={} {} {} {} damage={} {} {} {}",
@@ -675,7 +680,7 @@ void CScreenshareFrame::storeTempFB() {
     m_session->m_tempFB->alloc(m_bufferSize.x, m_bufferSize.y);
     m_session->m_tempFB->setImageDescription(NColorManagement::DEFAULT_SRGB_IMAGE_DESCRIPTION);
 
-    CRegion fakeDamage = {0, 0, INT16_MAX, INT16_MAX};
+    CRegion fakeDamage = {0, 0, m_bufferSize.x, m_bufferSize.y};
 
     if (!g_pHyprRenderer->beginFullFakeRender(m_session->monitor(), fakeDamage, m_session->m_tempFB)) {
         LOGM(Log::ERR, "Can't copy: failed to begin rendering to temp fb");
@@ -698,12 +703,7 @@ Vector2D CScreenshareFrame::bufferSize() const {
 }
 
 wl_output_transform CScreenshareFrame::transform() const {
-    switch (m_session->m_type) {
-        case SHARE_REGION:
-        case SHARE_MONITOR: return m_session->monitor()->m_transform;
-        default:
-        case SHARE_WINDOW: return WL_OUTPUT_TRANSFORM_NORMAL;
-    }
+    return WL_OUTPUT_TRANSFORM_NORMAL;
 }
 
 const CRegion& CScreenshareFrame::damage() const {

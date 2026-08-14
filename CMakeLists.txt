@@ -109,7 +109,6 @@ add_compile_options(
   -Wno-unused-parameter
   -Wno-unused-value
   -Wno-missing-field-initializers
-  -Wno-gnu-zero-variadic-macro-arguments
   -Wno-narrowing
   -Wno-pointer-arith
   -Wno-clobbered
@@ -130,7 +129,7 @@ set(GLES_VERSION "GLES3")
 find_package(OpenGL REQUIRED COMPONENTS ${GLES_VERSION})
 find_package(glslang CONFIG REQUIRED)
 
-find_package(glaze 7...<8 QUIET)
+find_package(glaze QUIET)
 if(NOT glaze_FOUND)
   set(GLAZE_VERSION v7.2.0)
   message(STATUS "glaze dependency not found, retrieving ${GLAZE_VERSION} with FetchContent")
@@ -147,7 +146,7 @@ endif()
 set(AQUAMARINE_MINIMUM_VERSION 0.9.3)
 set(HYPRLANG_MINIMUM_VERSION 0.6.7)
 set(HYPRCURSOR_MINIMUM_VERSION 0.1.7)
-set(HYPRUTILS_MINIMUM_VERSION 0.13.1)
+set(HYPRUTILS_MINIMUM_VERSION 0.14.0)
 set(HYPRGRAPHICS_MINIMUM_VERSION 0.5.1)
 
 pkg_check_modules(aquamarine_dep REQUIRED IMPORTED_TARGET aquamarine>=${AQUAMARINE_MINIMUM_VERSION})
@@ -286,6 +285,7 @@ pkg_check_modules(deps
   re2
   muparser
   lcms2
+  libcanberra
 )
 
 pkg_search_module(LUA REQUIRED IMPORTED_TARGET GLOBAL lua55 lua5.5 lua-55 lua-5.5 lua>=5.5 lua<5.6)
@@ -373,6 +373,15 @@ check_include_file("sys/inotify.h" HAS_INOTIFY)
 pkg_check_modules(inotify IMPORTED_TARGET libinotify)
 if(NOT HAS_INOTIFY AND inotify_FOUND)
   target_link_libraries(hyprland_lib PUBLIC PkgConfig::inotify)
+endif()
+
+# sdbus-c++ is used to ask rtkit for realtime scheduling which is Linux-only
+if(NO_RTKIT OR NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  message(STATUS "rtkit realtime scheduling is disabled!")
+else()
+  pkg_check_modules(sdbus_dep REQUIRED IMPORTED_TARGET sdbus-c++>=2.0.0)
+  target_link_libraries(hyprland_lib PUBLIC PkgConfig::sdbus_dep)
+  add_compile_definitions(HAS_RTKIT)
 endif()
 
 if(NO_XWAYLAND)

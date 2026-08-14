@@ -7,6 +7,8 @@
 #include <hyprutils/utils/ScopeGuard.hpp>
 #include <list>
 #include <optional>
+#include <vector>
+#include <utility>
 #include "OpenGL.hpp"
 #include "./SyncFDManager.hpp"
 #include "./pass/Pass.hpp"
@@ -122,8 +124,6 @@ namespace Render {
         wl_event_source*                    m_crashingLoop       = nullptr;
         wl_event_source*                    m_cursorTicker       = nullptr;
 
-        std::vector<CHLBufferReference>     m_usedAsyncBuffers;
-
         struct {
             int                                          hotspotX      = 0;
             int                                          hotspotY      = 0;
@@ -182,6 +182,7 @@ namespace Render {
         SP<ITexture>                 loadAsset(const std::string& filename);
         virtual bool                 shouldUseNewBlurOptimizations(PHLLS pLayer, PHLWINDOW pWindow);
         virtual bool                 explicitSyncSupported()                                                                                                     = 0;
+        virtual bool                 fp16Supported()                                                                                                             = 0;
         virtual std::vector<SDRMFormat> getDRMFormats()                                                                                                          = 0;
         virtual std::vector<uint64_t>   getDRMFormatModifiers(DRMFormat format)                                                                                  = 0;
         virtual SP<IFramebuffer>        createFB(const std::string& name = "")                                                                                   = 0;
@@ -196,9 +197,6 @@ namespace Render {
         virtual void setViewport(int x, int y, int width, int height)                                                                                            = 0;
 
         bool         preBlurQueued(PHLMONITORREF pMonitor);
-        void         pushMonitorTransformEnabled(bool enabled);
-        void         popMonitorTransformEnabled();
-        bool         monitorTransformEnabled();
         void         sendFrameEventsToWorkspace(PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now);
 
         void         setProjectionType(const Vector2D& fbSize);
@@ -254,9 +252,7 @@ namespace Render {
         SP<ITexture>                       m_lockDead2Texture;
         SP<ITexture>                       m_lockDead3Texture;
         SP<ITexture>                       m_lockTtyTextTexture;
-        CRenderPass*                       m_currentPass             = nullptr;
-        bool                               m_monitorTransformEnabled = false; // do not modify directly
-        std::stack<bool>                   m_monitorTransformStack;
+        CRenderPass*                       m_currentPass = nullptr;
 
         void                               handleFullscreenSettings(PHLMONITOR pMonitor);
 
@@ -267,6 +263,7 @@ namespace Render {
         void renderWorkspaceWindowsForMonitor(PHLMONITOR pRenderMonitor, PHLMONITOR pLogicalMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now);
         void renderPinnedWindowsForMonitor(PHLMONITOR pRenderMonitor, const Time::steady_tp& now);
         void sendFrameEventsToMonitor(PHLMONITOR pMonitor, const std::vector<PHLMONITOR>& logicalMonitors, const Time::steady_tp& now);
+        void renderIME(PHLMONITOR pMonitor, const Time::steady_tp& now, const CBox& geometry);
         void renderWorkspaceWindowsFullscreen(PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&); // renders workspace windows (fullscreen) (tiled, floating, pinned, but no special)
         void renderWorkspaceWindows(PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&); // renders workspace windows (no fullscreen) (tiled, floating, pinned, but no special)
         void renderAllClientsForWorkspace(PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const Vector2D& translate = {0, 0}, const float& scale = 1.f);

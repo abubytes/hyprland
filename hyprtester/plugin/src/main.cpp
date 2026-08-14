@@ -16,6 +16,7 @@
 #include <src/desktop/rule/windowRule/WindowRuleApplicator.hpp>
 #include <src/desktop/view/LayerSurface.hpp>
 #include <src/desktop/state/WindowState.hpp>
+#include <src/keybinds/Key.hpp>
 #include <src/Compositor.hpp>
 #include <src/desktop/state/FocusState.hpp>
 #include <src/state/MonitorState.hpp>
@@ -125,16 +126,7 @@ class CTestKeyboard : public IKeyboard {
     }
 
     void setMods(uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group) {
-        m_modifiersState.depressed = depressed;
-        m_modifiersState.latched   = latched;
-        m_modifiersState.locked    = locked;
-        m_modifiersState.group     = group;
-        m_keyboardEvents.modifiers.emit(IKeyboard::SModifiersEvent{
-            .depressed = depressed,
-            .latched   = latched,
-            .locked    = locked,
-            .group     = group,
-        });
+        updateModifiers(depressed, latched, locked, group);
     }
 
     void destroy() {
@@ -177,7 +169,7 @@ SP<CTestKeyboard>      g_keyboard;
 SP<CTestKeyboard>      g_keyboard2;
 
 static SDispatchResult pressAlt(std::string in) {
-    g_pInputManager->m_lastMods = in == "1" ? HL_MODIFIER_ALT : 0;
+    g_pInputManager->m_lastMods = in == "1" ? Input::HL_MODIFIER_ALT : Input::HL_MODIFIER_NONE;
 
     return {.success = true};
 }
@@ -402,9 +394,9 @@ static SDispatchResult keybind(std::string in) {
         key      = std::stoul(std::string{data[2]}) - 8; // xkb offset
     } catch (...) { return {.success = false, .error = "invalid input"}; }
 
-    uint32_t modifierMask = 0;
+    Input::ModifierMask modifierMask = Input::HL_MODIFIER_NONE;
     if (modifier > 0)
-        modifierMask = 1 << (modifier - 1);
+        modifierMask = sc<Input::ModifierMask>(1 << (modifier - 1));
     g_pInputManager->m_lastMods = modifierMask;
     g_keyboard->sendKey(key, press);
 
@@ -422,11 +414,33 @@ static SDispatchResult keybind2(std::string in) {
         key      = std::stoul(std::string{data[2]}) - 8;
     } catch (...) { return {.success = false, .error = "invalid input"}; }
 
-    uint32_t modifierMask = 0;
+    Input::ModifierMask modifierMask = Input::HL_MODIFIER_NONE;
     if (modifier > 0)
-        modifierMask = 1 << (modifier - 1);
+        modifierMask = sc<Input::ModifierMask>(1 << (modifier - 1));
     g_pInputManager->m_lastMods = modifierMask;
     g_keyboard2->sendKey(key, press);
+
+    return {};
+}
+
+static SDispatchResult keybindModmask(std::string in) {
+    CVarList2 data(std::move(in));
+    // 0 = release, 1 = press
+    bool press;
+    // See src/devices/IKeyboard.hpp : eKeyboardModifiers for modifier bitmasks
+    // 0 = none, eKeyboardModifiers is shifted to start at 1
+    uint32_t modifierMask;
+    // keycode
+    uint32_t key;
+    try {
+        press        = std::stoul(std::string{data[0]}) == 1;
+        modifierMask = std::stoul(std::string{data[1]});
+        key          = std::stoul(std::string{data[2]}) - 8; // xkb offset
+    } catch (...) { return {.success = false, .error = "invalid input"}; }
+
+    g_pInputManager->m_lastMods = g_pInputManager->xkbModsToHyprland(g_keyboard, modifierMask);
+    g_keyboard->setMods(modifierMask, 0, 0, 0);
+    g_keyboard->sendKey(key, press);
 
     return {};
 }
@@ -693,6 +707,13 @@ static int luaKeybind2(lua_State* L) {
     return luaResult(L, ::keybind2(std::format("{},{},{}", press, modifier, key)));
 }
 
+static int luaKeybindMask(lua_State* L) {
+    const auto press        = (int)luaL_checkinteger(L, 1);
+    const auto modifierMask = (int)luaL_checkinteger(L, 2);
+    const auto key          = (int)luaL_checkinteger(L, 3);
+    return luaResult(L, ::keybindModmask(std::format("{},{},{}", press, modifierMask, key)));
+}
+
 static int luaSetMods(lua_State* L) {
     const auto kbIndex   = (int)luaL_checkinteger(L, 1);
     const auto depressed = (int)luaL_checkinteger(L, 2);
@@ -767,6 +788,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addLuaFn("click", ::luaClick);
     addLuaFn("keybind", ::luaKeybind);
     addLuaFn("keybind2", ::luaKeybind2);
+    addLuaFn("keybind_modmask", ::luaKeybindMask);
     addLuaFn("set_mods", ::luaSetMods);
     addLuaFn("nullfocus", ::luaNullfocus);
     addLuaFn("clear_surface_focus", ::luaClearSurfaceFocus);

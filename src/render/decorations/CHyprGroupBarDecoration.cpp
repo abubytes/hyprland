@@ -161,7 +161,7 @@ void CHyprGroupBarDecoration::draw(PHLMONITOR pMonitor, float const& a) {
 
         rect.scale(pMonitor->m_scale).round();
 
-        const bool        GROUPLOCKED  = m_window->m_group->locked() || g_pKeybindManager->m_groupsLocked;
+        const bool        GROUPLOCKED  = m_window->m_group->locked() || Desktop::windowState()->groupsLocked();
         const auto* const PCOLACTIVE   = GROUPLOCKED ? GROUPCOLACTIVELOCKED : GROUPCOLACTIVE;
         const auto* const PCOLINACTIVE = GROUPLOCKED ? GROUPCOLINACTIVELOCKED : GROUPCOLINACTIVE;
 
@@ -318,7 +318,7 @@ static SP<ITexture> renderGradient(Config::CGradientValueData* grad) {
     if (!Desktop::focusState()->monitor())
         return nullptr;
 
-    const Vector2D& bufferSize = Desktop::focusState()->monitor()->m_pixelSize;
+    const Vector2D& bufferSize = Desktop::focusState()->monitor()->m_transformedSize;
 
     const auto      CAIROSURFACE = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, bufferSize.x, bufferSize.y);
     const auto      CAIRO        = cairo_create(CAIROSURFACE);
@@ -420,16 +420,25 @@ bool CHyprGroupBarDecoration::onEndWindowDragOnDeco(const Vector2D& pos, PHLWIND
     static auto PDRAGINTOGROUP                   = CConfigValue<Config::INTEGER>("group:drag_into_group");
     static auto PMERGEFLOATEDINTOTILEDONGROUPBAR = CConfigValue<Config::INTEGER>("group:merge_floated_into_tiled_on_groupbar");
     static auto PMERGEGROUPSONGROUPBAR           = CConfigValue<Config::INTEGER>("group:merge_groups_on_groupbar");
+    static auto PSTACKED                         = CConfigValue<Config::INTEGER>("group:groupbar:stacked");
+    static auto POUTERGAP                        = CConfigValue<Config::INTEGER>("group:groupbar:gaps_out");
+    static auto PINNERGAP                        = CConfigValue<Config::INTEGER>("group:groupbar:gaps_in");
     const bool  FLOATEDINTOTILED                 = !m_window->m_isFloating && !g_layoutManager->dragController()->draggingTiled();
 
     if (!pDraggedWindow->canBeGroupedInto(m_window->m_group) || (*PDRAGINTOGROUP != 1 && *PDRAGINTOGROUP != 2) || (FLOATEDINTOTILED && !*PMERGEFLOATEDINTOTILEDONGROUPBAR) ||
         (!*PMERGEGROUPSONGROUPBAR && pDraggedWindow->m_group))
         return false;
 
-    m_window->m_group->add(pDraggedWindow);
+    const float BARRELATIVE = *PSTACKED ? pos.y - assignedBoxGlobal().y - (m_barHeight + *POUTERGAP) / 2 : pos.x - assignedBoxGlobal().x - m_barWidth / 2;
+    const float BARSIZE     = *PSTACKED ? m_barHeight + *POUTERGAP : m_barWidth + *PINNERGAP;
+    const int   WINDOWINDEX = (BARRELATIVE < 0 ? -1 : BARRELATIVE / BARSIZE) + 1;
+
+    m_window->m_group->add(pDraggedWindow, WINDOWINDEX);
 
     if (!pDraggedWindow->getDecorationByType(DECORATION_GROUPBAR))
         pDraggedWindow->addWindowDeco(makeUnique<CHyprGroupBarDecoration>(pDraggedWindow));
+
+    Desktop::focusState()->fullWindowFocus(pDraggedWindow->m_target->window(), Desktop::FOCUS_REASON_DESKTOP_STATE_CHANGE);
 
     return true;
 }

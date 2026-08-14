@@ -8,6 +8,7 @@
 #include <string>
 #include <algorithm>
 #include <cctype>
+#include <format>
 
 using namespace Config;
 using namespace Hyprutils::String;
@@ -85,7 +86,8 @@ static bool parseModeLine(const std::string& modeline, drmModeModeInfo& mode) {
             Log::logger->log(Log::ERR, "Invalid flag {} in modeline", key);
     }
 
-    snprintf(mode.name, sizeof(mode.name), "%dx%d@%d", mode.hdisplay, mode.vdisplay, mode.vrefresh / 1000);
+    const auto [nameEnd, size] = std::format_to_n(mode.name, sizeof(mode.name) - 1, "{}x{}@{}", mode.hdisplay, mode.vdisplay, mode.vrefresh / 1000);
+    *nameEnd                   = '\0';
 
     return true;
 }

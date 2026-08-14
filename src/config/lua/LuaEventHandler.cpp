@@ -90,7 +90,8 @@ CLuaEventHandler::CLuaEventHandler(lua_State* L) : m_lua(L) {
 
     using namespace Event;
 
-    m_listeners.push_back(bus()->m_events.window.open.listen([this](PHLWINDOW w) { dispatch("window.open", 1, [&](lua_State* L) { CLuaWindow::push(L, w); }); }));
+    // openLate so that actual things people expect to happen will happen.
+    m_listeners.push_back(bus()->m_events.window.openLate.listen([this](PHLWINDOW w) { dispatch("window.open", 1, [&](lua_State* L) { CLuaWindow::push(L, w); }); }));
     m_listeners.push_back(bus()->m_events.window.openEarly.listen([this](PHLWINDOW w) { dispatch("window.open_early", 1, [&](lua_State* L) { CLuaWindow::push(L, w); }); }));
     m_listeners.push_back(bus()->m_events.window.close.listen([this](PHLWINDOW w) { dispatch("window.close", 1, [&](lua_State* L) { CLuaWindow::push(L, w); }); }));
     m_listeners.push_back(bus()->m_events.window.destroy.listen([this](PHLWINDOWREF w) { dispatch("window.destroy", 1, [&](lua_State* L) { CLuaWindow::push(L, w.lock()); }); }));
@@ -113,6 +114,8 @@ CLuaEventHandler::CLuaEventHandler(lua_State* L) : m_lua(L) {
             CLuaWorkspace::push(L, ws);
         });
     }));
+    m_listeners.push_back(
+        bus()->m_events.window.bell.listen([this](PHLWINDOW w, Event::SCallbackInfo&) { dispatch("window.bell", 1, [&](lua_State* L) { CLuaWindow::push(L, w); }); }));
 
     m_listeners.push_back(bus()->m_events.layer.opened.listen([this](PHLLS ls) { dispatch("layer.opened", 1, [&](lua_State* L) { CLuaLayerSurface::push(L, ls); }); }));
     m_listeners.push_back(bus()->m_events.layer.closed.listen([this](PHLLS ls) { dispatch("layer.closed", 1, [&](lua_State* L) { CLuaLayerSurface::push(L, ls); }); }));
@@ -277,6 +280,7 @@ std::unordered_set<std::string> CLuaEventHandler::knownEvents() {
         "window.fullscreen",
         "window.update_rules",
         "window.move_to_workspace",
+        "window.bell",
         "layer.opened",
         "layer.closed",
         "monitor.added",

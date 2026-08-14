@@ -23,6 +23,7 @@
   hyprwayland-scanner,
   hyprwire,
   lcms2,
+  libcanberra,
   libGL,
   libdrm,
   libei,
@@ -43,6 +44,7 @@
   pciutils,
   python3,
   re2,
+  sdbus-cpp_2,
   systemd,
   tomlplusplus,
   udis86-hyprland,
@@ -189,6 +191,7 @@ customStdenv.mkDerivation (finalAttrs: {
       hyprutils
       hyprwire
       lcms2
+      libcanberra
       libdrm
       libgbm
       libGL
@@ -202,6 +205,7 @@ customStdenv.mkDerivation (finalAttrs: {
       pango
       pciutils
       re2
+      sdbus-cpp_2
       tomlplusplus
       udis86-hyprland
       wayland

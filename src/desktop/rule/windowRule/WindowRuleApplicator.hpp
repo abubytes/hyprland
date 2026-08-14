@@ -103,6 +103,7 @@ namespace Desktop::Rule {
         DEFINE_PROP(bool, noFocus, false, WINDOW_RULE_EFFECT_NO_FOCUS)
         DEFINE_PROP(bool, noMaxSize, false, WINDOW_RULE_EFFECT_NO_MAX_SIZE)
         DEFINE_PROP(bool, noShadow, false, WINDOW_RULE_EFFECT_NO_SHADOW)
+        DEFINE_PROP(bool, noWobble, false, WINDOW_RULE_EFFECT_NO_WOBBLE)
         DEFINE_PROP(bool, noShortcutsInhibit, false, WINDOW_RULE_EFFECT_NO_SHORTCUTS_INHIBIT)
         DEFINE_PROP(bool, opaque, false, WINDOW_RULE_EFFECT_OPAQUE)
         DEFINE_PROP(bool, dimAround, false, WINDOW_RULE_EFFECT_DIM_AROUND)
@@ -118,6 +119,7 @@ namespace Desktop::Rule {
         DEFINE_PROP(bool, persistentSize, false, WINDOW_RULE_EFFECT_PERSISTENT_SIZE)
         DEFINE_PROP(bool, stayFocused, false, WINDOW_RULE_EFFECT_STAY_FOCUSED)
         DEFINE_PROP(bool, confinePointer, false, WINDOW_RULE_EFFECT_CONFINE_POINTER)
+        DEFINE_PROP(bool, noXdgDrags, false, WINDOW_RULE_EFFECT_NO_XDG_DRAGS)
 
         DEFINE_PROP(int, idleInhibitMode, false, WINDOW_RULE_EFFECT_IDLE_INHIBIT)
 

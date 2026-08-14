@@ -91,8 +91,17 @@ PHLWORKSPACE Internal::workspaceFromLuaSelectorOrObject(lua_State* L, int idx, c
         return ws;
     }
 
-    if (lua_isstring(L, idx) || lua_isnumber(L, idx))
-        return State::workspaceState()->query().string(argStr(L, idx)).run();
+    if (lua_isstring(L, idx) || lua_isnumber(L, idx)) {
+        const auto id = getWorkspaceIDNameFromString(argStr(L, idx)).id;
+        if (id == WORKSPACE_INVALID)
+            return nullptr;
+
+        auto ws = State::workspaceState()->query().id(id).run();
+        if (!ws)
+            return nullptr;
+
+        return ws;
+    }
 
     Internal::configError(L, "{}: expected a workspace object or selector", fnName);
     return nullptr;
@@ -189,6 +198,8 @@ std::optional<std::string> Internal::workspaceSelectorFromLuaSelectorOrObject(lu
             return std::nullopt;
         }
 
+        if (ws->m_isSpecialWorkspace)
+            return ws->m_name;
         return std::to_string(ws->m_id);
     }
 

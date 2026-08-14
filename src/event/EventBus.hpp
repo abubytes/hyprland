@@ -77,6 +77,7 @@ namespace Event {
                 Event<PHLWINDOW>                        create;
                 Event<PHLWINDOW>                        open;
                 Event<PHLWINDOW>                        openEarly;
+                Event<PHLWINDOW>                        openLate;
                 Event<PHLWINDOWREF>                     destroy;
                 Event<PHLWINDOW>                        close;
                 Event<PHLWINDOW>                        kill;
@@ -89,6 +90,7 @@ namespace Event {
                 Event<PHLWINDOW>                        floating;
                 Event<PHLWINDOW>                        updateRules;
                 Event<PHLWINDOW, PHLWORKSPACE>          moveToWorkspace;
+                Cancellable<PHLWINDOW>                  bell;
             } window;
 
             struct {

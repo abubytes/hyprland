@@ -81,56 +81,55 @@ Vector2D CWLSurface::getViewporterCorrectedSize() const {
     return m_resource->m_current.viewport.hasDestination ? m_resource->m_current.viewport.destination : m_resource->m_current.bufferSize;
 }
 
-CRegion CWLSurface::computeDamage() const {
+CRegion CWLSurface::computeDamage(const std::optional<CBox>& box) const {
     if (!m_resource->m_current.texture)
         return {};
-
-    CRegion damage = m_resource->m_current.accumulateBufferDamage();
-    damage.transform(Math::wlTransformToHyprutils(m_resource->m_current.transform), m_resource->m_current.bufferSize.x, m_resource->m_current.bufferSize.y);
 
     const auto BUFSIZE = m_resource->m_current.bufferSize;
     if (BUFSIZE.x <= 0 || BUFSIZE.y <= 0)
         return {};
-
-    const auto CORRECTVEC = correctSmallVecBuf();
-
-    if (m_resource->m_current.viewport.hasSource)
-        damage.intersect(m_resource->m_current.viewport.source);
 
     const auto SCALEDSRCSIZE =
         m_resource->m_current.viewport.hasSource ? m_resource->m_current.viewport.source.size() * m_resource->m_current.scale : m_resource->m_current.bufferSize;
     if (SCALEDSRCSIZE.x <= 0 || SCALEDSRCSIZE.y <= 0)
         return {};
 
-    damage.scale({BUFSIZE.x / SCALEDSRCSIZE.x, BUFSIZE.y / SCALEDSRCSIZE.y});
-    damage.translate(CORRECTVEC);
-
-    // go from buffer coords in the damage to hl logical
-
-    const auto BOX      = getSurfaceBoxGlobal();
     const auto SURFSIZE = m_resource->m_current.size;
     if (SURFSIZE.x <= 0 || SURFSIZE.y <= 0)
         return {};
 
-    const Vector2D SCALE = SURFSIZE / m_resource->m_current.bufferSize;
-
-    damage.scale(SCALE);
-    if (BOX.has_value()) {
-        auto boxSize = BOX->size();
+    std::optional<Vector2D> boxSize;
+    if (box.has_value()) {
+        boxSize = box->size();
 
         if (m_view->type() == VIEW_TYPE_WINDOW) {
             const auto WINDOW = dynamicPointerCast<CWindow>(m_view.lock());
             if (!WINDOW)
                 return {};
 
-            boxSize = boxSize * WINDOW->m_X11SurfaceScaledBy;
+            boxSize = boxSize.value() * WINDOW->m_X11SurfaceScaledBy;
         }
 
-        if (boxSize.x <= 0 || boxSize.y <= 0)
+        if (boxSize->x <= 0 || boxSize->y <= 0)
             return {};
-
-        damage.intersect(CBox{{}, boxSize});
     }
+
+    const auto CORRECTVEC = correctSmallVecBuf();
+
+    CRegion    damage = m_resource->m_current.accumulateBufferDamage();
+    damage.transform(Math::wlTransformToHyprutils(m_resource->m_current.transform), BUFSIZE.x, BUFSIZE.y);
+
+    if (m_resource->m_current.viewport.hasSource)
+        damage.intersect(m_resource->m_current.viewport.source);
+
+    damage.scale({BUFSIZE.x / SCALEDSRCSIZE.x, BUFSIZE.y / SCALEDSRCSIZE.y});
+    damage.translate(CORRECTVEC);
+
+    // go from buffer coords in the damage to hl logical
+    damage.scale(SURFSIZE / BUFSIZE);
+
+    if (boxSize)
+        damage.intersect(CBox{{}, boxSize.value()});
 
     return damage;
 }

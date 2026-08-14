@@ -193,7 +193,7 @@ void CPresentationProtocol::onPresented(PHLMONITOR pMonitor, const timespec& whe
 
     std::erase_if(m_feedbacks, [](const auto& other) { return !other->m_surface || other->m_done; });
     std::erase_if(m_queue, [pMonitor](const auto& other) {
-        return !other->m_surface || !other->m_monitor || isSamePresentedOutput(other->m_monitor.lock(), pMonitor) || other->m_done;
+        return !other->m_surface || !other->m_monitor || isSamePresentedOutput(other->m_monitor.lock(), pMonitor);
     });
 }
 

@@ -2,7 +2,7 @@
 #include "../Compositor.hpp"
 #include "../config/ConfigValue.hpp"
 #include "../config/shared/actions/ConfigActions.hpp"
-#include "../config/legacy/ConfigManager.hpp"
+#include "../config/ConfigManager.hpp"
 #include "../protocols/PointerGestures.hpp"
 #include "../protocols/RelativePointer.hpp"
 #include "../protocols/IdleNotify.hpp"
@@ -623,6 +623,9 @@ SP<Aquamarine::IBuffer> CPointerManager::renderHWCursorBuffer(SP<CPointerManager
 
     CRegion damageRegion = {0, 0, INT_MAX, INT_MAX};
     g_pHyprRenderer->beginFullFakeRender(state->monitor.lock(), damageRegion, RBO->getFB());
+    g_pHyprRenderer->m_renderData.fbSize = RBO->getFB()->m_size;
+    g_pHyprRenderer->setProjectionType(Render::RPT_FB);
+    g_pHyprRenderer->m_renderData.transformDamage = true;
     g_pHyprRenderer->startRenderPass();
     g_pHyprRenderer->draw(CClearPassElement::SClearData{{0.F, 0.F, 0.F, 0.F}});
 
@@ -638,25 +641,26 @@ SP<Aquamarine::IBuffer> CPointerManager::renderHWCursorBuffer(SP<CPointerManager
     return buf;
 }
 
-void CPointerManager::renderSoftwareCursorsFor(PHLMONITOR pMonitor, const Time::steady_tp& now, CRegion& damage, std::optional<Vector2D> overridePos, bool forceRender,
-                                               Vector2D renderOffset) {
+void CPointerManager::renderSoftwareCursorsFor(PHLMONITOR pMonitor, const Time::steady_tp& now, CRegion& damage, std::optional<Vector2D> overridePos, bool screencopy,
+                                               bool forceRender, Vector2D renderOffset) {
     if (!hasCursor())
         return;
 
     auto state = stateFor(pMonitor);
     state->box = getCursorBoxLogicalForMonitor(pMonitor);
 
-    if (!state->hardwareFailed && state->softwareLocks == 0 && !forceRender) {
+    if (!state->hardwareFailed && state->softwareLocks == 0 && !screencopy) {
         if (m_currentCursorImage.surface)
             m_currentCursorImage.surface->resource()->frame(now);
         return;
     }
 
-    // don't render cursor if forced but we are already using sw cursors for the monitor
-    // otherwise we draw the cursor again for screencopy when using sw cursors.
+    // don't render cursor on screencopy if using sw cursors
+    // otherwise we draw the cursor again for screencopy when using sw cursors
+    // unless this is toplevel capture and we *actually* have to force render cursors.
     // Virtual (split) captures re-render the scene from scratch without a cursor, so their
     // export buffer never already contains SW cursors — always allow the forced overlay.
-    if (forceRender && !pMonitor->isVirtual() && (state->hardwareFailed || state->softwareLocks != 0))
+    if (screencopy && !forceRender && (state->hardwareFailed || state->softwareLocks != 0))
         return;
 
     auto box = state->box.copy();
@@ -688,7 +692,7 @@ void CPointerManager::renderSoftwareCursorsFor(PHLMONITOR pMonitor, const Time::
     g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(std::move(data)));
 
     // to erase the leftover in updateCursorBackend()
-    if (!forceRender) {
+    if (!screencopy) {
         state->swRendered    = true;
         state->swRenderedBox = logicalBox;
     }
