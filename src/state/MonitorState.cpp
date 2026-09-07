@@ -17,7 +17,7 @@
 #include "../desktop/state/WindowState.hpp"
 #include "../desktop/state/FocusState.hpp"
 #include "../desktop/Workspace.hpp"
-#include "../desktop/view/Window.hpp"
+#include "../desktop/view/window/Window.hpp"
 #include "../config/shared/monitor/MonitorRule.hpp"
 #include "../managers/fullscreen/FullscreenController.hpp"
 #include "../protocols/XDGOutput.hpp"
@@ -243,12 +243,12 @@ void CMonitorStateTracker::rebuildVirtualMonitors() {
         monitor->m_activeWorkspace = workspace;
 
         for (auto const& w : Desktop::windowState()->windows()) {
-            if (w->m_workspace != workspace || w->m_pinned)
+            if (w->m_workspace != workspace || (w->m_state & Desktop::View::WINDOW_STATE_PINNED))
                 continue;
 
             w->m_monitor = monitor;
 
-            if (OLD_MONITOR && OLD_MONITOR != monitor && w->m_isFloating)
+            if (OLD_MONITOR && OLD_MONITOR != monitor && w->isFloating())
                 w->layoutTarget()->setPositionGlobal(w->layoutTarget()->position().translate(-OLD_MONITOR->m_position + monitor->m_position));
 
             if (Fullscreen::controller()->isFullscreen(w))
@@ -480,7 +480,7 @@ void CMonitorStateTracker::rebuildVirtualMonitors() {
         workspace->m_events.monitorChanged.emit();
 
         for (auto const& w : Desktop::windowState()->windows()) {
-            if (w->m_workspace == workspace && !w->m_pinned)
+            if (w->m_workspace == workspace && !(w->m_state & Desktop::View::WINDOW_STATE_PINNED))
                 w->m_monitor = FALLBACK_MONITOR;
         }
     }

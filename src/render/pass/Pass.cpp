@@ -144,7 +144,7 @@ CRegion CRenderPass::render(const CRegion& damage_) {
     if (g_pHyprRenderer->m_screencopyDebugActive) {
         auto       REQUESTED_DAMAGE = damage_;
         const auto REQ_EXTENTS      = REQUESTED_DAMAGE.getExtents();
-        Log::logger->log(Log::TRACE, "[SSDBG] pass render start mon={} elements={} requestedDamage={} {} {} {} noSimplify={}", pMonitor ? pMonitor->m_name : "<none>",
+        LOG(Log::TRACE, "[SSDBG] pass render start mon={} elements={} requestedDamage={} {} {} {} noSimplify={}", pMonitor ? pMonitor->m_name : "<none>",
                          m_passElements.size(), REQ_EXTENTS.x, REQ_EXTENTS.y, REQ_EXTENTS.w, REQ_EXTENTS.h, g_pHyprRenderer->m_renderData.noSimplify);
     }
 
@@ -180,7 +180,7 @@ CRegion CRenderPass::render(const CRegion& damage_) {
 
     if (m_damage.empty()) {
         if (g_pHyprRenderer->m_screencopyDebugActive)
-            Log::logger->log(Log::TRACE, "[SSDBG] pass render stop empty-damage mon={} elements={}", pMonitor ? pMonitor->m_name : "<none>", m_passElements.size());
+            LOG(Log::TRACE, "[SSDBG] pass render stop empty-damage mon={} elements={}", pMonitor ? pMonitor->m_name : "<none>", m_passElements.size());
         g_pHyprRenderer->m_renderData.damage      = m_damage;
         g_pHyprRenderer->m_renderData.finalDamage = m_damage;
         return m_damage;
@@ -233,7 +233,7 @@ CRegion CRenderPass::render(const CRegion& damage_) {
     if (m_passElements.empty()) {
         if (g_pHyprRenderer->m_screencopyDebugActive) {
             const auto DMG_EXTENTS = m_damage.getExtents();
-            Log::logger->log(Log::TRACE, "[SSDBG] pass render stop no-elements mon={} damage={} {} {} {}", pMonitor ? pMonitor->m_name : "<none>", DMG_EXTENTS.x, DMG_EXTENTS.y,
+            LOG(Log::TRACE, "[SSDBG] pass render stop no-elements mon={} damage={} {} {} {}", pMonitor ? pMonitor->m_name : "<none>", DMG_EXTENTS.x, DMG_EXTENTS.y,
                              DMG_EXTENTS.w, DMG_EXTENTS.h);
         }
         return {};
@@ -247,7 +247,7 @@ CRegion CRenderPass::render(const CRegion& damage_) {
             CBox       bb          = {};
             if (BB.has_value())
                 bb = *BB;
-            Log::logger->log(Log::TRACE, "[SSDBG] pass element mon={} idx={} type={} name={} discard={} hasBB={} bb={} {} {} {} elementDamage={} {} {} {}", pMonitor ? pMonitor->m_name : "<none>",
+            LOG(Log::TRACE, "[SSDBG] pass element mon={} idx={} type={} name={} discard={} hasBB={} bb={} {} {} {} elementDamage={} {} {} {}", pMonitor ? pMonitor->m_name : "<none>",
                              index, sc<int>(el.element->type()), el.element->passName(), el.discard, BB.has_value(), bb.x, bb.y, bb.w, bb.h, DAMAGE_EXTS.x, DAMAGE_EXTS.y,
                              DAMAGE_EXTS.w, DAMAGE_EXTS.h);
             ++index;
@@ -261,7 +261,7 @@ CRegion CRenderPass::render(const CRegion& damage_) {
     for (auto& el : m_passElements) {
         if (el.discard) {
             if (g_pHyprRenderer->m_screencopyDebugActive)
-                Log::logger->log(Log::TRACE, "[SSDBG] pass discard mon={} name={}", pMonitor ? pMonitor->m_name : "<none>", el.element->passName());
+                LOG(Log::TRACE, "[SSDBG] pass discard mon={} name={}", pMonitor ? pMonitor->m_name : "<none>", el.element->passName());
             el.element->discard();
             continue;
         }
@@ -269,7 +269,7 @@ CRegion CRenderPass::render(const CRegion& damage_) {
         g_pHyprRenderer->m_renderData.damage = el.elementDamage;
         if (g_pHyprRenderer->m_screencopyDebugActive) {
             const auto DAMAGE_EXTS = el.elementDamage.getExtents();
-            Log::logger->log(Log::TRACE, "[SSDBG] pass draw mon={} name={} damage={} {} {} {}", pMonitor ? pMonitor->m_name : "<none>", el.element->passName(), DAMAGE_EXTS.x,
+            LOG(Log::TRACE, "[SSDBG] pass draw mon={} name={} damage={} {} {} {}", pMonitor ? pMonitor->m_name : "<none>", el.element->passName(), DAMAGE_EXTS.x,
                              DAMAGE_EXTS.y, DAMAGE_EXTS.w, DAMAGE_EXTS.h);
         }
         g_pHyprRenderer->draw(el.element, el.elementDamage);

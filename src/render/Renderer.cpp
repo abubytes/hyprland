@@ -539,13 +539,13 @@ void IHyprRenderer::renderWorkspaceWindowsForMonitor(PHLMONITOR pRenderMonitor, 
     windows.reserve(Desktop::windowState()->windows().size());
 
     for (auto const& w : Desktop::windowState()->windows()) {
-        if (w->isHidden() || !w->m_isMapped)
+        if (w->isHidden() || !w->mapped())
             continue;
 
-        if (w->m_pinned || w->m_workspace != pWorkspace)
+        if ((w->m_state & WINDOW_STATE_PINNED) || w->m_workspace != pWorkspace)
             continue;
 
-        if (!w->visibleOnMonitor(pLogicalMonitor))
+        if (!w->presentation().visibleOnMonitor(pLogicalMonitor))
             continue;
 
         windows.emplace_back(w);
@@ -565,7 +565,7 @@ void IHyprRenderer::renderWorkspaceWindowsForMonitor(PHLMONITOR pRenderMonitor, 
     };
 
     for (auto& w : windows) {
-        if (w->m_isFloating || !shouldRenderInWorkspace(w))
+        if (w->isFloating() || !shouldRenderInWorkspace(w))
             continue;
 
         if (w == Desktop::focusState()->window()) {
@@ -583,7 +583,7 @@ void IHyprRenderer::renderWorkspaceWindowsForMonitor(PHLMONITOR pRenderMonitor, 
     renderFadeouts(pRenderMonitor, Desktop::FADEOUT_PLANE_WINDOW_TILED, pWorkspace);
 
     for (auto& w : windows) {
-        if (w->m_isFloating || !shouldRenderInWorkspace(w))
+        if (w->isFloating() || !shouldRenderInWorkspace(w))
             continue;
 
         if (Fullscreen::controller()->isFullscreen(w.lock()))
@@ -591,14 +591,14 @@ void IHyprRenderer::renderWorkspaceWindowsForMonitor(PHLMONITOR pRenderMonitor, 
     }
 
     for (auto& w : windows) {
-        if (!w || w->m_isFloating || !shouldRenderInWorkspace(w) || Fullscreen::controller()->isFullscreen(w.lock()))
+        if (!w || w->isFloating() || !shouldRenderInWorkspace(w) || Fullscreen::controller()->isFullscreen(w.lock()))
             continue;
 
         renderWindow(w.lock(), pRenderMonitor, time, true, RENDER_PASS_POPUP);
     }
 
     for (auto& w : windows) {
-        if (!w || !w->m_isFloating || !shouldRenderInWorkspace(w))
+        if (!w || !w->isFloating() || !shouldRenderInWorkspace(w))
             continue;
 
         if (Fullscreen::controller()->hasFullscreen(pWorkspace) && !w->shouldRenderOverFullscreen() && !w->isFadingOutUnderFullscreen())
@@ -612,13 +612,13 @@ void IHyprRenderer::renderWorkspaceWindowsForMonitor(PHLMONITOR pRenderMonitor, 
 
 void IHyprRenderer::renderPinnedWindowsForMonitor(PHLMONITOR pRenderMonitor, const Time::steady_tp& time) {
     for (auto const& w : Desktop::windowState()->windows()) {
-        if (w->isHidden() && !w->m_isMapped)
+        if (w->isHidden() && !w->mapped())
             continue;
 
-        if (!w->m_pinned || !w->m_isFloating)
+        if (!(w->m_state & WINDOW_STATE_PINNED) || !w->isFloating())
             continue;
 
-        if (!w->visibleOnMonitor(pRenderMonitor))
+        if (!w->presentation().visibleOnMonitor(pRenderMonitor))
             continue;
 
         renderWindow(w, pRenderMonitor, time, true, RENDER_PASS_ALL);
@@ -693,7 +693,7 @@ void IHyprRenderer::renderLogicalMonitorForScreencopy(PHLMONITOR pMonitor, const
     auto countLayers = [&](zwlrLayerShellV1Layer layer) {
         size_t count = 0;
         for (auto const& ls : pMonitor->m_layerSurfaceLayers[layer]) {
-            if (!ls.expired() && ls->aliveAndVisible())
+            if (!ls.expired() && ls->mapped())
                 ++count;
         }
         return count;
@@ -701,23 +701,23 @@ void IHyprRenderer::renderLogicalMonitorForScreencopy(PHLMONITOR pMonitor, const
 
     size_t workspaceWindows = 0, visibleWindows = 0, pinnedWindows = 0;
     for (auto const& w : Desktop::windowState()->windows()) {
-        if (!w || (w->isHidden() && !w->m_isMapped))
+        if (!w || (w->isHidden() && !w->mapped()))
             continue;
 
-        if (w->m_pinned) {
-            if (w->visibleOnMonitor(pMonitor))
+        if (w->m_state & WINDOW_STATE_PINNED) {
+            if (w->presentation().visibleOnMonitor(pMonitor))
                 ++pinnedWindows;
             continue;
         }
 
         if (w->m_workspace == pMonitor->m_activeWorkspace) {
             ++workspaceWindows;
-            if (w->visibleOnMonitor(pMonitor))
+            if (w->presentation().visibleOnMonitor(pMonitor))
                 ++visibleWindows;
         }
     }
 
-    Log::logger->log(Log::WARN,
+    LOG(Log::WARN,
                      "[SSDBG] renderLogical start mon={} id={} virt={} pos={} size={} pix={} scale={} ws={} layers bg/bot/top/ov={}/{}/{}/{} wins workspace/visible/pinned={}/{}/{}",
                      pMonitor->m_name, pMonitor->m_id, pMonitor->isVirtual(), pMonitor->m_position, pMonitor->m_size, pMonitor->m_pixelSize, pMonitor->m_scale,
                      pMonitor->m_activeWorkspace ? pMonitor->m_activeWorkspace->m_name : "<none>", countLayers(ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND),
@@ -726,13 +726,13 @@ void IHyprRenderer::renderLogicalMonitorForScreencopy(PHLMONITOR pMonitor, const
 
     for (auto const& layer : pMonitor->m_layerSurfaceLayers) {
         for (auto const& ls : layer) {
-            if (ls.expired() || !ls->aliveAndVisible())
+            if (ls.expired() || !ls->mapped())
                 continue;
 
             const auto POS  = ls->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
             const auto SIZE = ls->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-            Log::logger->log(Log::TRACE, "[SSDBG] renderLogical layer mon={} ns={} layer={} pos={} size={} geom={} {} {} {} mapped={}", pMonitor->m_name, ls->m_namespace,
-                             sc<int>(ls->m_layer), POS, SIZE, ls->m_geometry.x, ls->m_geometry.y, ls->m_geometry.w, ls->m_geometry.h, ls->m_mapped);
+            LOG(Log::TRACE, "[SSDBG] renderLogical layer mon={} ns={} layer={} pos={} size={} geom={} {} {} {} mapped={}", pMonitor->m_name, ls->m_namespace,
+                             sc<int>(ls->m_layer), POS, SIZE, ls->m_geometry.x, ls->m_geometry.y, ls->m_geometry.w, ls->m_geometry.h, ls->mapped());
         }
     }
 
@@ -740,10 +740,10 @@ void IHyprRenderer::renderLogicalMonitorForScreencopy(PHLMONITOR pMonitor, const
         if (!w || w->m_workspace != pMonitor->m_activeWorkspace)
             continue;
 
-        Log::logger->log(Log::TRACE, "[SSDBG] renderLogical window mon={} title={} winMon={} pos={} size={} visible={} mapped={} hidden={} floating={} pinned={} fullscreen={}",
-                         pMonitor->m_name, w->m_title, w->m_monitor ? w->m_monitor->m_name : "<none>", w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT),
-                         w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT), w->visibleOnMonitor(pMonitor),
-                         w->m_isMapped, w->isHidden(), w->m_isFloating, w->m_pinned, Fullscreen::controller()->isFullscreen(w));
+        LOG(Log::TRACE, "[SSDBG] renderLogical window mon={} title={} winMon={} pos={} size={} visible={} mapped={} hidden={} floating={} pinned={} fullscreen={}",
+                         pMonitor->m_name, w->metadata().title(), w->m_monitor ? w->m_monitor->m_name : "<none>", w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT),
+                         w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT), w->presentation().visibleOnMonitor(pMonitor),
+                         w->mapped(), w->isHidden(), w->isFloating(), sc<bool>(w->m_state & WINDOW_STATE_PINNED), Fullscreen::controller()->isFullscreen(w));
     }
 
     const auto OLDDEBUG       = m_screencopyDebugActive;
@@ -752,7 +752,7 @@ void IHyprRenderer::renderLogicalMonitorForScreencopy(PHLMONITOR pMonitor, const
     renderVirtualMonitorWorkspaces(pMonitor, {pMonitor}, now);
 
     const auto DAMAGE_EXTENTS = m_renderData.damage.getExtents();
-    Log::logger->log(Log::TRACE, "[SSDBG] renderLogical end mon={} renderDamageExtents={} {} {} {}", pMonitor->m_name, DAMAGE_EXTENTS.x, DAMAGE_EXTENTS.y, DAMAGE_EXTENTS.w,
+    LOG(Log::TRACE, "[SSDBG] renderLogical end mon={} renderDamageExtents={} {} {} {}", pMonitor->m_name, DAMAGE_EXTENTS.x, DAMAGE_EXTENTS.y, DAMAGE_EXTENTS.w,
                      DAMAGE_EXTENTS.h);
 }
 
@@ -1119,10 +1119,10 @@ void IHyprRenderer::draw(const CSurfacePassElement::SRenderData& data, const CRe
         const auto TEXBOX = element->getTexBox();
         auto       DAMAGE = damage;
         const auto DMG    = DAMAGE.getExtents();
-        Log::logger->log(Log::WARN,
+        LOG(Log::WARN,
                          "[SSDBG] drawSurface mon={} kind={} name={} pos={} local={} wh={} texbox={} {} {} {} clip={} {} {} {} damage={} {} {} {} surfSize={} main={} alpha={} fade={}",
                          data.pMonitor ? data.pMonitor->m_name : "<none>", data.pWindow ? "window" : (data.pLS ? "layer" : "surface"),
-                         data.pWindow ? data.pWindow->m_title : (data.pLS ? data.pLS->m_namespace : "<none>"), data.pos, data.localPos, Vector2D{data.w, data.h}, TEXBOX.x, TEXBOX.y,
+                         data.pWindow ? data.pWindow->metadata().title() : (data.pLS ? data.pLS->m_namespace : "<none>"), data.pos, data.localPos, Vector2D{data.w, data.h}, TEXBOX.x, TEXBOX.y,
                          TEXBOX.w, TEXBOX.h, data.clipBox.x, data.clipBox.y, data.clipBox.w, data.clipBox.h, DMG.x, DMG.y, DMG.w, DMG.h,
                          data.surface ? data.surface->m_current.size : Vector2D{}, data.mainSurface, data.alpha, data.fadeAlpha);
     }
@@ -1134,7 +1134,7 @@ void IHyprRenderer::draw(const CTexPassElement::SRenderData& data, const CRegion
     if (m_screencopyDebugActive) {
         auto       DAMAGE = damage;
         const auto DMG    = DAMAGE.getExtents();
-        Log::logger->log(Log::TRACE, "[SSDBG] drawTex mon={} box={} {} {} {} texSize={} damage={} {} {} {} customUV={} a={}",
+        LOG(Log::TRACE, "[SSDBG] drawTex mon={} box={} {} {} {} texSize={} damage={} {} {} {} customUV={} a={}",
                          m_renderData.pMonitor ? m_renderData.pMonitor->m_name : "<none>", data.box.x, data.box.y, data.box.w, data.box.h, data.tex ? data.tex->m_size : Vector2D{},
                          DMG.x, DMG.y, DMG.w, DMG.h, data.allowCustomUV, data.a);
     }

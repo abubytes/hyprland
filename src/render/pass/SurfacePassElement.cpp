@@ -140,8 +140,8 @@ CRegion CSurfacePassElement::visibleRegion(bool& cancel) {
     auto PSURFACE = Desktop::View::CWLSurface::fromResource(m_data.surface);
     if (!PSURFACE) {
         if (g_pHyprRenderer->m_screencopyDebugActive)
-            Log::logger->log(Log::TRACE, "[SSDBG] visibleRegion empty no-surface mon={} kind={} name={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
-                             m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"), m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"));
+            LOG(Log::TRACE, "[SSDBG] visibleRegion empty no-surface mon={} kind={} name={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
+                             m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"), m_data.pWindow ? m_data.pWindow->metadata().title() : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"));
         return {};
     }
 
@@ -150,8 +150,8 @@ CRegion CSurfacePassElement::visibleRegion(bool& cancel) {
     auto        visibleRegion = PSURFACE->m_visibleRegion.copy();
     if (visibleRegion.empty()) {
         if (g_pHyprRenderer->m_screencopyDebugActive)
-            Log::logger->log(Log::TRACE, "[SSDBG] visibleRegion empty source mon={} kind={} name={} buffer={} surfSize={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
-                             m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"), m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"),
+            LOG(Log::TRACE, "[SSDBG] visibleRegion empty source mon={} kind={} name={} buffer={} surfSize={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
+                             m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"), m_data.pWindow ? m_data.pWindow->metadata().title() : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"),
                              bufferSize, m_data.surface->m_current.size);
         return {};
     }
@@ -162,8 +162,8 @@ CRegion CSurfacePassElement::visibleRegion(bool& cancel) {
     if (visibleRegion.empty()) {
         cancel = true;
         if (g_pHyprRenderer->m_screencopyDebugActive)
-            Log::logger->log(Log::TRACE, "[SSDBG] visibleRegion canceled by buffer mon={} kind={} name={} raw={} {} {} {} buffer={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
-                             m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"), m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"),
+            LOG(Log::TRACE, "[SSDBG] visibleRegion canceled by buffer mon={} kind={} name={} raw={} {} {} {} buffer={}", m_data.pMonitor ? m_data.pMonitor->m_name : "<none>",
+                             m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"), m_data.pWindow ? m_data.pWindow->metadata().title() : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"),
                              RAW_EXTENTS.x, RAW_EXTENTS.y, RAW_EXTENTS.w, RAW_EXTENTS.h, bufferSize);
         return visibleRegion;
     }
@@ -191,10 +191,10 @@ CRegion CSurfacePassElement::visibleRegion(bool& cancel) {
 
     if (g_pHyprRenderer->m_screencopyDebugActive) {
         const auto FINAL_EXTENTS = visibleRegion.getExtents();
-        Log::logger->log(Log::WARN,
+        LOG(Log::WARN,
                          "[SSDBG] visibleRegion ok mon={} kind={} name={} raw={} {} {} {} final={} {} {} {} buffer={} texbox={} {} {} {} uvTL={} uvBR={} pos={} local={} scale={}",
                          m_data.pMonitor ? m_data.pMonitor->m_name : "<none>", m_data.pWindow ? "window" : (m_data.pLS ? "layer" : "surface"),
-                         m_data.pWindow ? m_data.pWindow->m_title : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"), RAW_EXTENTS.x, RAW_EXTENTS.y, RAW_EXTENTS.w, RAW_EXTENTS.h,
+                         m_data.pWindow ? m_data.pWindow->metadata().title() : (m_data.pLS ? m_data.pLS->m_namespace : "<none>"), RAW_EXTENTS.x, RAW_EXTENTS.y, RAW_EXTENTS.w, RAW_EXTENTS.h,
                          FINAL_EXTENTS.x, FINAL_EXTENTS.y, FINAL_EXTENTS.w, FINAL_EXTENTS.h, bufferSize, texBox.x, texBox.y, texBox.w, texBox.h, uvTL, uvBR, m_data.pos,
                          m_data.localPos, m_data.pMonitor ? m_data.pMonitor->m_scale : 0);
     }

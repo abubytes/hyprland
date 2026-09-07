@@ -34,7 +34,7 @@ static bool shouldMaskNoScreenShareWindow(PHLWINDOW pWindow, PHLMONITOR pMonitor
     if (!pWindow->m_ruleApplicator->noScreenShare().valueOrDefault())
         return false;
 
-    if (!pWindow->visibleOnMonitor(pMonitor))
+    if (!pWindow->presentation().visibleOnMonitor(pMonitor))
         return false;
 
     if (pWindow->isHidden())
@@ -51,7 +51,7 @@ static bool shouldMaskNoScreenShareWindow(PHLWINDOW pWindow, PHLMONITOR pMonitor
     if (!PWORKSPACE)
         return false;
 
-    if (pWindow->m_pinned)
+    if (pWindow->m_state & WINDOW_STATE_PINNED)
         return true;
 
     // Physical monitor captures use the parent output texture. Tiled windows that belong
@@ -438,14 +438,13 @@ void CScreenshareFrame::renderMonitor() {
         }
 
         if (!TEXTURE->m_imageDescription)
-            Log::logger->log(Log::ERR, "CM: FIXME no source image description for screenshare");
+            LOG(Log::ERR, "CM: FIXME no source image description for screenshare");
 
         if (!g_pHyprRenderer->m_renderData.currentFB->imageDescription())
-            Log::logger->log(Log::ERR, "CM: FIXME no target image description for screenshare");
+            LOG(Log::ERR, "CM: FIXME no target image description for screenshare");
 
         if (TEXTURE->m_imageDescription && g_pHyprRenderer->m_renderData.currentFB->imageDescription())
-            Log::logger->log(Log::TRACE, "CM: screenshot renderMonitor {} -> {}", TEXTURE->m_imageDescription->value(),
-                             g_pHyprRenderer->m_renderData.currentFB->imageDescription()->value());
+            LOG(Log::TRACE, "CM: screenshot renderMonitor (has src+dst image descriptions)");
 
         g_pHyprRenderer->m_renderData.fbSize = m_bufferSize;
         g_pHyprRenderer->setProjectionType(Render::RPT_EXPORT);

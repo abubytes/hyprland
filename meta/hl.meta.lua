@@ -5,6 +5,7 @@
 ---@alias HL.EventName
 ---| "config.props_refreshed"
 ---| "config.reloaded"
+---| "config.unload"
 ---| "hyprland.shutdown"
 ---| "hyprland.start"
 ---| "input.keyboard.key"
@@ -23,6 +24,7 @@
 ---| "window.destroy"
 ---| "window.fullscreen"
 ---| "window.kill"
+---| "window.minimize"
 ---| "window.move_to_workspace"
 ---| "window.open"
 ---| "window.open_early"
@@ -71,6 +73,7 @@
 ---| "cursor.use_cpu_buffer"
 ---| "cursor.warp_back_after_non_mouse_input"
 ---| "cursor.warp_on_change_workspace"
+---| "cursor.warp_on_monitor_change"
 ---| "cursor.warp_on_toggle_special"
 ---| "cursor.zoom_detached_camera"
 ---| "cursor.zoom_disable_aa"
@@ -99,9 +102,32 @@
 ---| "debug.suppress_errors"
 ---| "debug.vfr"
 ---| "decoration.active_opacity"
+---| "decoration.blur.acrylic.aberration"
+---| "decoration.blur.acrylic.bulb"
+---| "decoration.blur.acrylic.clarity"
+---| "decoration.blur.acrylic.refraction"
+---| "decoration.blur.acrylic.tint"
+---| "decoration.blur.aurora.color1"
+---| "decoration.blur.aurora.color2"
+---| "decoration.blur.aurora.intensity"
+---| "decoration.blur.aurora.speed"
 ---| "decoration.blur.brightness"
 ---| "decoration.blur.contrast"
+---| "decoration.blur.drops.speed"
 ---| "decoration.blur.enabled"
+---| "decoration.blur.fluid_jar.color"
+---| "decoration.blur.fluid_jar.distortion"
+---| "decoration.blur.fluid_jar.fill_amount"
+---| "decoration.blur.fluid_jar.mass"
+---| "decoration.blur.fluid_jar.precision"
+---| "decoration.blur.fluid_jar.speed"
+---| "decoration.blur.fluid_jar.turbulence"
+---| "decoration.blur.glass.refraction"
+---| "decoration.blur.glass.roughness"
+---| "decoration.blur.glass.size"
+---| "decoration.blur.haze.intensity"
+---| "decoration.blur.haze.iridescence"
+---| "decoration.blur.heat_shimmer.speed"
 ---| "decoration.blur.ignore_opacity"
 ---| "decoration.blur.input_methods"
 ---| "decoration.blur.input_methods_ignorealpha"
@@ -110,10 +136,20 @@
 ---| "decoration.blur.passes"
 ---| "decoration.blur.popups"
 ---| "decoration.blur.popups_ignorealpha"
+---| "decoration.blur.ripple.duration"
+---| "decoration.blur.ripple.radius"
+---| "decoration.blur.ripple.strength"
+---| "decoration.blur.ripple.width"
 ---| "decoration.blur.size"
 ---| "decoration.blur.special"
+---| "decoration.blur.variant"
 ---| "decoration.blur.vibrancy"
 ---| "decoration.blur.vibrancy_darkness"
+---| "decoration.blur.water.damping"
+---| "decoration.blur.water.duration"
+---| "decoration.blur.water.radius"
+---| "decoration.blur.water.speed"
+---| "decoration.blur.water.strength"
 ---| "decoration.blur.xray"
 ---| "decoration.border_part_of_window"
 ---| "decoration.dim_around"
@@ -372,6 +408,7 @@
 ---| "opengl.nvidia_anti_flicker"
 ---| "quirks.prefer_hdr"
 ---| "quirks.skip_non_kms_dmabuf_formats"
+---| "render.async_commit"
 ---| "render.cm_auto_hdr"
 ---| "render.cm_enabled"
 ---| "render.cm_sdr_eotf"
@@ -470,6 +507,10 @@ local __HL_BindOptions = {}
 ---@field timeout integer
 ---@field type "repeat"|"oneshot"
 local __HL_TimerOptions = {}
+
+---@class HL.GetMonitorsOptions
+---@field all? boolean
+local __HL_GetMonitorsOptions = {}
 
 ---@class HL.GestureSpec
 ---@field fingers integer
@@ -631,7 +672,6 @@ local __HL_WindowRuleSpec = {}
 ---@field no_border? boolean
 ---@field no_rounding? boolean
 ---@field no_shadow? boolean
----@field no_wobble? boolean
 ---@field on_created_empty? string
 ---@field persistent? boolean
 ---@field workspace string
@@ -696,7 +736,7 @@ local __HL_LayerRule = {}
 ---@field above_fullscreen boolean|nil
 ---@field address string
 ---@field h integer
----@field interactivity integer
+---@field keyboard_interactivity integer
 ---@field layer integer
 ---@field mapped boolean
 ---@field monitor HL.Monitor|nil
@@ -716,11 +756,14 @@ local __HL_LayerSurface = {}
 ---@field cm string
 ---@field description string
 ---@field dpms_status boolean
+---@field enabled boolean
 ---@field focused boolean
+---@field hardware_details boolean|string|table
 ---@field height integer
 ---@field id integer
 ---@field is_mirror boolean
 ---@field mirrors HL.Monitor|table
+---@field mode integer|number|table
 ---@field name string
 ---@field physical_height integer
 ---@field physical_width integer
@@ -789,7 +832,7 @@ local __HL_Timer = {}
 ---@field pin_fullscreened boolean
 ---@field pinned boolean
 ---@field size integer|table
----@field stable_id integer
+---@field stable_id string
 ---@field swallowing HL.Window|nil
 ---@field tags string|table
 ---@field tearing_hint boolean|nil
@@ -860,7 +903,7 @@ local __HL_WorkspaceRule = {}
 ---@field get_monitor fun(selector: HL.MonitorSelector): HL.Monitor|nil
 ---@field get_monitor_at fun(x: number|HL.Vec2, y?: number): HL.Monitor|nil
 ---@field get_monitor_at_cursor fun(): HL.Monitor|nil
----@field get_monitors fun(): HL.Monitor[]
+---@field get_monitors fun(options?: HL.GetMonitorsOptions): HL.Monitor[]
 ---@field get_urgent_window fun(): HL.Window|nil
 ---@field get_window fun(selector: HL.WindowSelector): HL.Window|nil
 ---@field get_windows fun(filters?: HL.WindowQueryFilter): HL.Window[]
@@ -897,6 +940,7 @@ local __HL_API = {}
 ---@field no_op fun(...): HL.Dispatcher
 ---@field pass fun(...): HL.Dispatcher
 ---@field release_input_capture fun(...): HL.Dispatcher
+---@field reload_config fun(...): HL.Dispatcher
 ---@field send_key_state fun(...): HL.Dispatcher
 ---@field send_shortcut fun(...): HL.Dispatcher
 ---@field submap fun(...): HL.Dispatcher
@@ -1005,6 +1049,7 @@ hl = {}
 ---@field ['cursor.use_cpu_buffer'] integer|boolean
 ---@field ['cursor.warp_back_after_non_mouse_input'] boolean
 ---@field ['cursor.warp_on_change_workspace'] integer|boolean
+---@field ['cursor.warp_on_monitor_change'] integer|boolean
 ---@field ['cursor.warp_on_toggle_special'] integer|boolean
 ---@field ['cursor.zoom_detached_camera'] boolean
 ---@field ['cursor.zoom_disable_aa'] boolean
@@ -1033,9 +1078,32 @@ hl = {}
 ---@field ['debug.suppress_errors'] boolean
 ---@field ['debug.vfr'] boolean
 ---@field ['decoration.active_opacity'] number|boolean
+---@field ['decoration.blur.acrylic.aberration'] number|boolean
+---@field ['decoration.blur.acrylic.bulb'] number|boolean
+---@field ['decoration.blur.acrylic.clarity'] number|boolean
+---@field ['decoration.blur.acrylic.refraction'] number|boolean
+---@field ['decoration.blur.acrylic.tint'] string
+---@field ['decoration.blur.aurora.color1'] string
+---@field ['decoration.blur.aurora.color2'] string
+---@field ['decoration.blur.aurora.intensity'] number|boolean
+---@field ['decoration.blur.aurora.speed'] number|boolean
 ---@field ['decoration.blur.brightness'] number|boolean
 ---@field ['decoration.blur.contrast'] number|boolean
+---@field ['decoration.blur.drops.speed'] number|boolean
 ---@field ['decoration.blur.enabled'] boolean
+---@field ['decoration.blur.fluid_jar.color'] string
+---@field ['decoration.blur.fluid_jar.distortion'] number|boolean
+---@field ['decoration.blur.fluid_jar.fill_amount'] number|boolean
+---@field ['decoration.blur.fluid_jar.mass'] number|boolean
+---@field ['decoration.blur.fluid_jar.precision'] number|boolean
+---@field ['decoration.blur.fluid_jar.speed'] number|boolean
+---@field ['decoration.blur.fluid_jar.turbulence'] number|boolean
+---@field ['decoration.blur.glass.refraction'] number|boolean
+---@field ['decoration.blur.glass.roughness'] number|boolean
+---@field ['decoration.blur.glass.size'] number|boolean
+---@field ['decoration.blur.haze.intensity'] number|boolean
+---@field ['decoration.blur.haze.iridescence'] number|boolean
+---@field ['decoration.blur.heat_shimmer.speed'] number|boolean
 ---@field ['decoration.blur.ignore_opacity'] boolean
 ---@field ['decoration.blur.input_methods'] boolean
 ---@field ['decoration.blur.input_methods_ignorealpha'] number|boolean
@@ -1044,10 +1112,20 @@ hl = {}
 ---@field ['decoration.blur.passes'] integer|boolean
 ---@field ['decoration.blur.popups'] boolean
 ---@field ['decoration.blur.popups_ignorealpha'] number|boolean
+---@field ['decoration.blur.ripple.duration'] number|boolean
+---@field ['decoration.blur.ripple.radius'] number|boolean
+---@field ['decoration.blur.ripple.strength'] number|boolean
+---@field ['decoration.blur.ripple.width'] number|boolean
 ---@field ['decoration.blur.size'] integer|boolean
 ---@field ['decoration.blur.special'] boolean
+---@field ['decoration.blur.variant'] integer|boolean
 ---@field ['decoration.blur.vibrancy'] number|boolean
 ---@field ['decoration.blur.vibrancy_darkness'] number|boolean
+---@field ['decoration.blur.water.damping'] number|boolean
+---@field ['decoration.blur.water.duration'] number|boolean
+---@field ['decoration.blur.water.radius'] number|boolean
+---@field ['decoration.blur.water.speed'] number|boolean
+---@field ['decoration.blur.water.strength'] number|boolean
 ---@field ['decoration.blur.xray'] boolean
 ---@field ['decoration.border_part_of_window'] boolean
 ---@field ['decoration.dim_around'] number|boolean
@@ -1278,7 +1356,7 @@ hl = {}
 ---@field ['misc.disable_xdg_env_checks'] boolean
 ---@field ['misc.enable_anr_dialog'] boolean
 ---@field ['misc.enable_swallow'] boolean
----@field ['misc.exit_window_retains_fullscreen'] boolean
+---@field ['misc.exit_window_retains_fullscreen'] integer|boolean
 ---@field ['misc.float_force_onscreen'] integer|boolean
 ---@field ['misc.focus_on_activate'] boolean
 ---@field ['misc.font_family'] string
@@ -1306,6 +1384,7 @@ hl = {}
 ---@field ['opengl.nvidia_anti_flicker'] boolean
 ---@field ['quirks.prefer_hdr'] integer|boolean
 ---@field ['quirks.skip_non_kms_dmabuf_formats'] boolean
+---@field ['render.async_commit'] boolean
 ---@field ['render.cm_auto_hdr'] integer|boolean
 ---@field ['render.cm_enabled'] boolean
 ---@field ['render.cm_sdr_eotf'] string
@@ -1432,6 +1511,7 @@ local __HL_ConfigValueTypes = {}
 
 ---@class HL.ConfigOpt.Decoration.Blur
 ---@field enabled? boolean
+---@field variant? integer|boolean
 ---@field size? integer|boolean
 ---@field passes? integer|boolean
 ---@field ignore_opacity? boolean
@@ -1447,6 +1527,65 @@ local __HL_ConfigValueTypes = {}
 ---@field popups_ignorealpha? number|boolean
 ---@field input_methods? boolean
 ---@field input_methods_ignorealpha? number|boolean
+---@field glass? HL.ConfigOpt.Decoration.Blur.Glass
+---@field acrylic? HL.ConfigOpt.Decoration.Blur.Acrylic
+---@field drops? HL.ConfigOpt.Decoration.Blur.Drops
+---@field heat_shimmer? HL.ConfigOpt.Decoration.Blur.HeatShimmer
+---@field aurora? HL.ConfigOpt.Decoration.Blur.Aurora
+---@field haze? HL.ConfigOpt.Decoration.Blur.Haze
+---@field ripple? HL.ConfigOpt.Decoration.Blur.Ripple
+---@field water? HL.ConfigOpt.Decoration.Blur.Water
+---@field fluid_jar? HL.ConfigOpt.Decoration.Blur.FluidJar
+
+---@class HL.ConfigOpt.Decoration.Blur.Glass
+---@field refraction? number|boolean
+---@field size? number|boolean
+---@field roughness? number|boolean
+
+---@class HL.ConfigOpt.Decoration.Blur.Acrylic
+---@field refraction? number|boolean
+---@field bulb? number|boolean
+---@field clarity? number|boolean
+---@field aberration? number|boolean
+---@field tint? string
+
+---@class HL.ConfigOpt.Decoration.Blur.Drops
+---@field speed? number|boolean
+
+---@class HL.ConfigOpt.Decoration.Blur.HeatShimmer
+---@field speed? number|boolean
+
+---@class HL.ConfigOpt.Decoration.Blur.Aurora
+---@field speed? number|boolean
+---@field intensity? number|boolean
+---@field color1? string
+---@field color2? string
+
+---@class HL.ConfigOpt.Decoration.Blur.Haze
+---@field intensity? number|boolean
+---@field iridescence? number|boolean
+
+---@class HL.ConfigOpt.Decoration.Blur.Ripple
+---@field strength? number|boolean
+---@field radius? number|boolean
+---@field width? number|boolean
+---@field duration? number|boolean
+
+---@class HL.ConfigOpt.Decoration.Blur.Water
+---@field strength? number|boolean
+---@field radius? number|boolean
+---@field speed? number|boolean
+---@field damping? number|boolean
+---@field duration? number|boolean
+
+---@class HL.ConfigOpt.Decoration.Blur.FluidJar
+---@field color? string
+---@field speed? number|boolean
+---@field fill_amount? number|boolean
+---@field mass? number|boolean
+---@field precision? number|boolean
+---@field turbulence? number|boolean
+---@field distortion? number|boolean
 
 ---@class HL.ConfigOpt.Decoration.MotionBlur
 ---@field enabled? boolean
@@ -1647,7 +1786,7 @@ local __HL_ConfigValueTypes = {}
 ---@field background_color? string
 ---@field close_special_on_empty? boolean
 ---@field on_focus_under_fullscreen? integer|boolean
----@field exit_window_retains_fullscreen? boolean
+---@field exit_window_retains_fullscreen? integer|boolean
 ---@field initial_workspace_tracking? integer|boolean
 ---@field initial_workspace_token_timeout? integer|boolean
 ---@field middle_click_paste? boolean
@@ -1703,6 +1842,7 @@ local __HL_ConfigValueTypes = {}
 ---@field send_content_type? boolean
 ---@field cm_auto_hdr? integer|boolean
 ---@field new_render_scheduling? boolean
+---@field async_commit? boolean
 ---@field non_shader_cm? integer|boolean
 ---@field cm_sdr_eotf? string
 ---@field commit_timing_enabled? boolean
@@ -1724,6 +1864,7 @@ local __HL_ConfigValueTypes = {}
 ---@field no_warps? boolean
 ---@field persistent_warps? boolean
 ---@field warp_on_change_workspace? integer|boolean
+---@field warp_on_monitor_change? integer|boolean
 ---@field warp_on_toggle_special? integer|boolean
 ---@field default_monitor? string
 ---@field zoom_factor? number|boolean
