@@ -1,4 +1,5 @@
 #include "PluginAPI.hpp"
+#include "../desktop/view/window/WindowPresentation.hpp"
 #include "../Compositor.hpp"
 #include "../ipc/s1/S1.hpp"
 #include "../plugins/PluginSystem.hpp"
@@ -138,20 +139,18 @@ APICALL bool HyprlandAPI::removeFunctionHook(HANDLE handle, CFunctionHook* hook)
     return g_pFunctionHookSystem->removeHook(hook);
 }
 
-APICALL bool HyprlandAPI::addWindowDecoration(HANDLE handle, PHLWINDOW pWindow, UP<IHyprWindowDecoration> pDecoration) {
+APICALL bool HyprlandAPI::addWindowDecoration(HANDLE handle, PHLWINDOW pWindow, SP<IHyprWindowDecoration>&& pDecoration) {
     auto* const PLUGIN = g_pPluginSystem->getPluginByHandle(handle);
 
     if (!PLUGIN)
         return false;
 
-    if (!validMapped(pWindow))
+    if (!validMapped(pWindow) || !pDecoration)
         return false;
 
     PLUGIN->m_registeredDecorations.push_back(pDecoration.get());
 
-    pWindow->addWindowDeco(std::move(pDecoration));
-
-    pWindow->layoutTarget()->recalc();
+    pWindow->presentation().addDecoration(std::move(pDecoration));
 
     return true;
 }
@@ -163,9 +162,9 @@ APICALL bool HyprlandAPI::removeWindowDecoration(HANDLE handle, IHyprWindowDecor
         return false;
 
     for (auto const& w : Desktop::windowState()->windows()) {
-        for (auto const& d : w->m_windowDecorations) {
+        for (auto const& d : w->presentation().decorations()) {
             if (d.get() == pDecoration) {
-                w->removeWindowDeco(pDecoration);
+                w->presentation().removeDecoration(pDecoration);
                 return true;
             }
         }
@@ -289,9 +288,11 @@ APICALL std::vector<SFunctionMatch> HyprlandAPI::findFunctionsByName(HANDLE hand
 #ifdef __clang__
     static const auto SYMBOLS          = execAndGet(std::format("llvm-nm -D -j \"{}\"", FPATH.string()).c_str());
     static const auto SYMBOLSDEMANGLED = execAndGet(std::format("llvm-nm -D -j --demangle \"{}\"", FPATH.string()).c_str());
+    constexpr auto    NM_BINARY        = "llvm-nm";
 #else
     static const auto SYMBOLS          = execAndGet(std::format("nm -D -j \"{}\"", FPATH.string()).c_str());
     static const auto SYMBOLSDEMANGLED = execAndGet(std::format("nm -D -j --demangle=auto \"{}\"", FPATH.string()).c_str());
+    constexpr auto    NM_BINARY        = "nm";
 #endif
 
     auto demangledFromID = [&](size_t id) -> std::string {
@@ -313,13 +314,7 @@ APICALL std::vector<SFunctionMatch> HyprlandAPI::findFunctionsByName(HANDLE hand
     };
 
     if (SYMBOLS.empty()) {
-        Log::logger->log(Log::ERR, R"(Unable to search for function "{}": no symbols found in binary (is "{}" in path?))", name,
-#ifdef __clang__
-                         "llvm-nm"
-#else
-                         "nm"
-#endif
-        );
+        LOG(Log::ERR, R"(Unable to search for function "{}": no symbols found in binary (is "{}" in path?))", name, NM_BINARY);
         return {};
     }
 
@@ -386,7 +381,7 @@ APICALL bool HyprlandAPI::addConfigValueV2(HANDLE handle, SP<Config::Values::IVa
 
     auto ret = Config::mgr()->registerPluginValue(handle, value);
     if (!ret) {
-        Log::logger->log(Log::ERR, "failed to register plugin value \"{}\": {}", value->name(), ret.error());
+        LOG(Log::ERR, "failed to register plugin value \"{}\": {}", value->name(), ret.error());
         return false;
     }
 
@@ -406,7 +401,7 @@ APICALL bool HyprlandAPI::addLuaFunction(HANDLE handle, const std::string& names
 
     auto ret = dynamicPointerCast<Config::Lua::CConfigManager>(WP<Config::IConfigManager>(Config::mgr()))->registerPluginLuaFunction(handle, namespace_, name, fn);
     if (!ret) {
-        Log::logger->log(Log::ERR, "failed to register lua plugin function {}.{}: {}", namespace_, name, ret.error());
+        LOG(Log::ERR, "failed to register lua plugin function {}.{}: {}", namespace_, name, ret.error());
         return false;
     }
 
@@ -424,7 +419,7 @@ APICALL bool HyprlandAPI::removeLuaFunction(HANDLE handle, const std::string& na
 
     auto ret = dynamicPointerCast<Config::Lua::CConfigManager>(WP<Config::IConfigManager>(Config::mgr()))->unregisterPluginLuaFunction(handle, namespace_, name);
     if (!ret) {
-        Log::logger->log(Log::ERR, "failed to unregister lua plugin function {}.{}: {}", namespace_, name, ret.error());
+        LOG(Log::ERR, "failed to unregister lua plugin function {}.{}: {}", namespace_, name, ret.error());
         return false;
     }
 
@@ -439,7 +434,7 @@ APICALL bool HyprlandAPI::addEvent(HANDLE handle, SP<Event::CEventBus::CCustomEv
 
     const auto ret = Event::bus()->addPluginEvent(event);
     if (!ret) {
-        Log::logger->log(Log::ERR, ret.error());
+        LOG(Log::ERR, ret.error());
         return false;
     }
 
@@ -454,7 +449,7 @@ APICALL bool HyprlandAPI::removeEvent(HANDLE handle, const std::string& name) {
 
     const auto ret = Event::bus()->removePluginEvent(name);
     if (!ret) {
-        Log::logger->log(Log::ERR, ret.error());
+        LOG(Log::ERR, ret.error());
         return false;
     }
 

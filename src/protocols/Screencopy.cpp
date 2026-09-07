@@ -27,13 +27,13 @@ CScreencopyClient::CScreencopyClient(SP<CZwlrScreencopyManagerV1> resource_) : m
 void CScreencopyClient::captureOutput(uint32_t frame, int32_t overlayCursor_, wl_resource* output, CBox box) {
     const auto PMONITORRES = CWLOutputResource::fromResource(output);
     if (!PMONITORRES || !PMONITORRES->m_monitor) {
-        LOGM(Log::ERR, "Tried to capture invalid output/monitor in {:x}", (uintptr_t)this);
+        LOG(Log::ERR, "Tried to capture invalid output/monitor in {:x}", (uintptr_t)this);
         m_resource->error(-1, "invalid output");
         return;
     }
 
     const auto PMONITOR = PMONITORRES->m_monitor.lock();
-    LOGM(Log::TRACE, "[SSDBG] captureOutput client={:x} frame={} output={} id={} virt={} pos={} size={} pix={} region={} {} {} {} overlay={}", (uintptr_t)m_resource->client(), frame,
+    LOG(Log::TRACE, "[SSDBG] captureOutput client={:x} frame={} output={} id={} virt={} pos={} size={} pix={} region={} {} {} {} overlay={}", (uintptr_t)m_resource->client(), frame,
          PMONITOR ? PMONITOR->m_name : "<none>", PMONITOR ? PMONITOR->m_id : -1, PMONITOR ? PMONITOR->isVirtual() : false, PMONITOR ? PMONITOR->m_position : Vector2D{},
          PMONITOR ? PMONITOR->m_size : Vector2D{}, PMONITOR ? PMONITOR->m_pixelSize : Vector2D{}, box.x, box.y, box.w, box.h, overlayCursor_);
 
@@ -44,7 +44,7 @@ void CScreencopyClient::captureOutput(uint32_t frame, int32_t overlayCursor_, wl
         makeShared<CScreencopyFrame>(makeShared<CZwlrScreencopyFrameV1>(m_resource->client(), m_resource->version(), frame), session, !!overlayCursor_));
 
     if (!FRAME->good()) {
-        LOGM(Log::ERR, "Couldn't alloc frame for sharing! (no memory)");
+        LOG(Log::ERR, "Couldn't alloc frame for sharing! (no memory)");
         m_resource->noMemory();
         PROTO::screencopy->destroyResource(FRAME.get());
         return;
@@ -72,20 +72,20 @@ CScreencopyFrame::CScreencopyFrame(SP<CZwlrScreencopyFrameV1> resource_, WP<CScr
 
     auto formats = m_session->allowedFormats();
     if (formats.empty()) {
-        LOGM(Log::ERR, "No format supported by renderer in screencopy protocol");
+        LOG(Log::ERR, "No format supported by renderer in screencopy protocol");
         m_resource->sendFailed();
         return;
     }
 
     DRMFormat  format  = formats.at(0);
     auto       bufSize = m_frame->bufferSize();
-    LOGM(Log::TRACE, "[SSDBG] screencopyFrame ctor sessionMon={} overlay={} format={} bufSize={}", m_session->monitor() ? m_session->monitor()->m_name : "<none>", overlayCursor, format,
+    LOG(Log::TRACE, "[SSDBG] screencopyFrame ctor sessionMon={} overlay={} format={} bufSize={}", m_session->monitor() ? m_session->monitor()->m_name : "<none>", overlayCursor, format,
          bufSize);
 
     const auto PSHMINFO = getPixelFormatFromDRM(format);
 
     if (!PSHMINFO) {
-        LOGM(Log::ERR, "No pixel format for drm format");
+        LOG(Log::ERR, "No pixel format for drm format");
         m_resource->sendFailed();
         return;
     }
@@ -103,18 +103,18 @@ CScreencopyFrame::CScreencopyFrame(SP<CZwlrScreencopyFrameV1> resource_, WP<CScr
 
 void CScreencopyFrame::shareFrame(CZwlrScreencopyFrameV1* pFrame, wl_resource* buffer, bool withDamage) {
     if UNLIKELY (!good()) {
-        LOGM(Log::ERR, "No frame in shareFrame??");
+        LOG(Log::ERR, "No frame in shareFrame??");
         return;
     }
 
     if UNLIKELY (m_session.expired() || !m_session->monitor()) {
-        LOGM(Log::ERR, "Session stopped for frame {:x}", (uintptr_t)this);
+        LOG(Log::ERR, "Session stopped for frame {:x}", (uintptr_t)this);
         m_resource->sendFailed();
         return;
     }
 
     if UNLIKELY (m_buffer) {
-        LOGM(Log::ERR, "Buffer used in {:x}", (uintptr_t)this);
+        LOG(Log::ERR, "Buffer used in {:x}", (uintptr_t)this);
         m_resource->error(ZWLR_SCREENCOPY_FRAME_V1_ERROR_ALREADY_USED, "frame already used");
         m_resource->sendFailed();
         return;
@@ -122,14 +122,14 @@ void CScreencopyFrame::shareFrame(CZwlrScreencopyFrameV1* pFrame, wl_resource* b
 
     const auto PBUFFERRES = CWLBufferResource::fromResource(buffer);
     if UNLIKELY (!PBUFFERRES || !PBUFFERRES->m_buffer) {
-        LOGM(Log::ERR, "Invalid buffer in {:x}", (uintptr_t)this);
+        LOG(Log::ERR, "Invalid buffer in {:x}", (uintptr_t)this);
         m_resource->error(ZWLR_SCREENCOPY_FRAME_V1_ERROR_INVALID_BUFFER, "invalid buffer");
         m_resource->sendFailed();
         return;
     }
 
     const auto& PBUFFER = PBUFFERRES->m_buffer.lock();
-    LOGM(Log::TRACE, "[SSDBG] shareFrame sessionMon={} withDamage={} clientBufferSize={} shm={} dmabuf={}", m_session->monitor() ? m_session->monitor()->m_name : "<none>", withDamage,
+    LOG(Log::TRACE, "[SSDBG] shareFrame sessionMon={} withDamage={} clientBufferSize={} shm={} dmabuf={}", m_session->monitor() ? m_session->monitor()->m_name : "<none>", withDamage,
          PBUFFER ? PBUFFER->size : Vector2D{}, PBUFFER && PBUFFER->shm().success, PBUFFER && PBUFFER->dmabuf().success);
 
     if (!withDamage)
@@ -142,7 +142,7 @@ void CScreencopyFrame::shareFrame(CZwlrScreencopyFrameV1* pFrame, wl_resource* b
             case RESULT_COPIED: {
                 auto       DAMAGE         = m_frame->damage();
                 const auto DAMAGE_EXTENTS = DAMAGE.getExtents();
-                LOGM(Log::TRACE, "[SSDBG] shareFrame callback copied sessionMon={} withDamage={} damage={} {} {} {}", m_session->monitor() ? m_session->monitor()->m_name : "<none>",
+                LOG(Log::TRACE, "[SSDBG] shareFrame callback copied sessionMon={} withDamage={} damage={} {} {} {}", m_session->monitor() ? m_session->monitor()->m_name : "<none>",
                      withDamage, DAMAGE_EXTENTS.x, DAMAGE_EXTENTS.y, DAMAGE_EXTENTS.w, DAMAGE_EXTENTS.h);
                 m_resource->sendFlags(sc<zwlrScreencopyFrameV1Flags>(0));
                 if (withDamage)
@@ -155,11 +155,11 @@ void CScreencopyFrame::shareFrame(CZwlrScreencopyFrameV1* pFrame, wl_resource* b
                 break;
             }
             case RESULT_NOT_COPIED:
-                LOGM(Log::ERR, "Frame share failed in {:x}", (uintptr_t)this);
+                LOG(Log::ERR, "Frame share failed in {:x}", (uintptr_t)this);
                 m_resource->sendFailed();
                 break;
             case RESULT_TIMESTAMP:
-                LOGM(Log::TRACE, "[SSDBG] shareFrame callback timestamp sessionMon={}", m_session->monitor() ? m_session->monitor()->m_name : "<none>");
+                LOG(Log::TRACE, "[SSDBG] shareFrame callback timestamp sessionMon={}", m_session->monitor() ? m_session->monitor()->m_name : "<none>");
                 m_timestamp = Time::steadyNow();
                 break;
         }
@@ -167,21 +167,21 @@ void CScreencopyFrame::shareFrame(CZwlrScreencopyFrameV1* pFrame, wl_resource* b
 
     switch (error) {
         case ERROR_NONE:
-            LOGM(Log::TRACE, "[SSDBG] shareFrame queued sessionMon={}", m_session->monitor() ? m_session->monitor()->m_name : "<none>");
+            LOG(Log::TRACE, "[SSDBG] shareFrame queued sessionMon={}", m_session->monitor() ? m_session->monitor()->m_name : "<none>");
             m_buffer = CHLBufferReference(PBUFFER);
             break;
         case ERROR_NO_BUFFER:
-            LOGM(Log::TRACE, "[SSDBG] shareFrame immediate error no-buffer sessionMon={}", m_session->monitor() ? m_session->monitor()->m_name : "<none>");
+            LOG(Log::TRACE, "[SSDBG] shareFrame immediate error no-buffer sessionMon={}", m_session->monitor() ? m_session->monitor()->m_name : "<none>");
             m_resource->error(ZWLR_SCREENCOPY_FRAME_V1_ERROR_INVALID_BUFFER, "invalid buffer");
             break;
         case ERROR_BUFFER_SIZE:
         case ERROR_BUFFER_FORMAT:
-            LOGM(Log::TRACE, "[SSDBG] shareFrame immediate error buffer mismatch sessionMon={} error={}", m_session->monitor() ? m_session->monitor()->m_name : "<none>", sc<int>(error));
+            LOG(Log::TRACE, "[SSDBG] shareFrame immediate error buffer mismatch sessionMon={} error={}", m_session->monitor() ? m_session->monitor()->m_name : "<none>", sc<int>(error));
             m_resource->sendFailed();
             break;
         case ERROR_UNKNOWN:
         case ERROR_STOPPED:
-            LOGM(Log::TRACE, "[SSDBG] shareFrame immediate error stopped/unknown sessionMon={} error={}", m_session->monitor() ? m_session->monitor()->m_name : "<none>", sc<int>(error));
+            LOG(Log::TRACE, "[SSDBG] shareFrame immediate error stopped/unknown sessionMon={} error={}", m_session->monitor() ? m_session->monitor()->m_name : "<none>", sc<int>(error));
             m_resource->sendFailed();
             break;
     }
@@ -199,7 +199,7 @@ void CScreencopyProtocol::bindManager(wl_client* client, void* data, uint32_t ve
     const auto CLIENT = m_clients.emplace_back(makeShared<CScreencopyClient>(makeShared<CZwlrScreencopyManagerV1>(client, ver, id)));
 
     if (!CLIENT->good()) {
-        LOGM(Log::DEBUG, "Failed to bind client! (out of memory)");
+        LOG(Log::DEBUG, "Failed to bind client! (out of memory)");
         CLIENT->m_resource->noMemory();
         m_clients.pop_back();
         return;
@@ -207,7 +207,7 @@ void CScreencopyProtocol::bindManager(wl_client* client, void* data, uint32_t ve
 
     CLIENT->m_self = CLIENT;
 
-    LOGM(Log::DEBUG, "Bound client successfully!");
+    LOG(Log::DEBUG, "Bound client successfully!");
 }
 
 void CScreencopyProtocol::destroyResource(CScreencopyClient* client) {

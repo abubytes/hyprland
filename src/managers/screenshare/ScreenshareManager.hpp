@@ -13,10 +13,10 @@ class CWLPointerResource;
 
 namespace Screenshare {
     enum eScreenshareType : uint8_t {
+        SHARE_NONE,
         SHARE_MONITOR,
         SHARE_WINDOW,
         SHARE_REGION,
-        SHARE_NONE
     };
 
     enum eScreenshareError : uint8_t {
@@ -210,6 +210,7 @@ namespace Screenshare {
             uint32_t regionSessions       = 0;
             uint32_t pendingMonitorFrames = 0;
             uint32_t pendingRegionFrames  = 0;
+            uint32_t pendingWindowFrames  = 0;
 
             bool     needsCopyFB() const {
                 return pendingFrames > 0;
@@ -254,7 +255,7 @@ namespace Screenshare {
     inline UP<CScreenshareManager>& mgr() {
         static UP<CScreenshareManager> manager = nullptr;
         if (!manager && g_pHyprRenderer) {
-            Log::logger->log(Log::DEBUG, "Starting ScreenshareManager");
+            LOG(Log::DEBUG, "Starting ScreenshareManager");
             manager = makeUnique<CScreenshareManager>();
         }
         return manager;

@@ -5,6 +5,9 @@
 
 #include "../../../../desktop/state/LayerState.hpp"
 #include "../../../../desktop/state/WindowState.hpp"
+#include "../../../../desktop/view/window/WindowFullscreenPolicy.hpp"
+#include "../../../../desktop/view/window/WindowGroupMembership.hpp"
+#include "../../../../desktop/view/window/WindowPresentation.hpp"
 
 #include "../../../../managers/fullscreen/FullscreenController.hpp"
 #include "../../../../managers/fullscreen/handler/FullscreenHandler.hpp"
@@ -12,6 +15,7 @@
 #include "../../../../layout/algorithm/tiled/scrolling/ScrollingFullscreenHandler.hpp"
 #include "../../../../layout/algorithm/tiled/scrolling/ScrollingAlgorithm.hpp"
 #include "../../../../layout/target/WindowGroupTarget.hpp"
+#include "../../../../layout/target/WindowTarget.hpp"
 #include "../../../../config/supplementary/propRefresher/PropRefresher.hpp"
 #include <hyprutils/utils/ScopeGuard.hpp>
 #include <optional>
@@ -21,7 +25,7 @@ using namespace Fullscreen::ScrollingFullscreenHandler;
 
 CScrollingFullscreenHandler::CScrollingFullscreenHandler(Layout::Tiled::CScrollingAlgorithm* const algorithm) : IFullscreenHandler(algorithm), m_scrollingAlgorithm(algorithm) {
     if (!m_scrollingAlgorithm)
-        Log::logger->log(Log::CRIT, "CScrollingFullscreenHandler failed during construction: Owning layout algorithm does not exist!");
+        LOG(Log::CRIT, "CScrollingFullscreenHandler failed during construction: Owning layout algorithm does not exist!");
 }
 
 CScrollingFullscreenHandler::~CScrollingFullscreenHandler() {
@@ -38,7 +42,7 @@ bool CScrollingFullscreenHandler::isFullscreen(SP<Layout::ITarget> target, const
     // Mode checking logic is the same as getFullscreenModes() - keep it in sync
 
     if (mode.value_or(FSMODE_FULLSCREEN) == FSMODE_NONE) {
-        Log::logger->log(Log::ERR, "Passed mode = FSMODE_NONE into isFullscreen(). Negating the result instead");
+        LOG(Log::ERR, "Passed mode = FSMODE_NONE into isFullscreen(). Negating the result instead");
         !isFullscreen(target, std::nullopt, covering);
     }
 
@@ -47,8 +51,8 @@ bool CScrollingFullscreenHandler::isFullscreen(SP<Layout::ITarget> target, const
 
     // A window group's FS state is considered to be owned by its current window
     if (const auto WINDOW_GROUP_TARGET = dc<Layout::CWindowGroupTarget*>(target.get()); WINDOW_GROUP_TARGET && target->type() == Layout::TARGET_TYPE_GROUP) {
-        if (WINDOW_GROUP_TARGET->getGroup() && WINDOW_GROUP_TARGET->getGroup()->current() && WINDOW_GROUP_TARGET->getGroup()->current()->m_target)
-            target = WINDOW_GROUP_TARGET->getGroup()->current()->m_target;
+        if (WINDOW_GROUP_TARGET->getGroup() && WINDOW_GROUP_TARGET->getGroup()->current() && WINDOW_GROUP_TARGET->getGroup()->current()->windowTarget())
+            target = WINDOW_GROUP_TARGET->getGroup()->current()->windowTarget();
         else
             return false;
     }
@@ -65,7 +69,7 @@ bool CScrollingFullscreenHandler::isFullscreen(SP<Layout::ITarget> target, const
         return false;
 
     if (TDATA->column->targetDatas.size() != 1) {
-        Log::logger->log(Log::DEBUG, "column->targetDatas != 1 in a column with FS target");
+        LOG(Log::DEBUG, "column->targetDatas != 1 in a column with FS target");
         return false;
     }
 
@@ -98,8 +102,8 @@ SFullscreenMode CScrollingFullscreenHandler::getFullscreenModes(SP<Layout::ITarg
 
     // A window group's FS modes are considered to be owned by its current window
     if (const auto WINDOW_GROUP_TARGET = dc<Layout::CWindowGroupTarget*>(target.get()); WINDOW_GROUP_TARGET && target->type() == Layout::TARGET_TYPE_GROUP) {
-        if (WINDOW_GROUP_TARGET->getGroup() && WINDOW_GROUP_TARGET->getGroup()->current() && WINDOW_GROUP_TARGET->getGroup()->current()->m_target)
-            target = WINDOW_GROUP_TARGET->getGroup()->current()->m_target;
+        if (WINDOW_GROUP_TARGET->getGroup() && WINDOW_GROUP_TARGET->getGroup()->current() && WINDOW_GROUP_TARGET->getGroup()->current()->windowTarget())
+            target = WINDOW_GROUP_TARGET->getGroup()->current()->windowTarget();
         else
             return {};
     }
@@ -285,16 +289,16 @@ void CScrollingFullscreenHandler::updateTargetRulesAndDecos(const SP<Layout::ITa
     const auto WINDOW  = target->window();
 
     // If window is in a group, we need to update these values for ALL members of the group.
-    if (WINDOW->m_group) {
-        for (const auto& gm : WINDOW->m_group->windows()) {
+    if (WINDOW->grouping().group()) {
+        for (const auto& gm : WINDOW->grouping().group()->windows()) {
             gm->m_ruleApplicator->propertiesChanged(Desktop::Rule::RULE_PROP_FULLSCREEN | Desktop::Rule::RULE_PROP_FULLSCREENSTATE_CLIENT |
                                                     Desktop::Rule::RULE_PROP_FULLSCREENSTATE_INTERNAL | Desktop::Rule::RULE_PROP_ON_WORKSPACE);
-            gm->updateDecorationValues();
+            gm->presentation().updateDecorations();
         }
     } else {
         WINDOW->m_ruleApplicator->propertiesChanged(Desktop::Rule::RULE_PROP_FULLSCREEN | Desktop::Rule::RULE_PROP_FULLSCREENSTATE_CLIENT |
                                                     Desktop::Rule::RULE_PROP_FULLSCREENSTATE_INTERNAL | Desktop::Rule::RULE_PROP_ON_WORKSPACE);
-        WINDOW->updateDecorationValues();
+        WINDOW->presentation().updateDecorations();
     }
 
     // Normally, FS controller's FS state setter's method of handling window rules should be used; but calling g_layoutManager->recalculateMonitor(MONITOR) and getSpace()->recalculate()
@@ -331,22 +335,23 @@ void CScrollingFullscreenHandler::setNoMembersAboveFullscreen(const std::optiona
         const auto MONITOR   = WORKSPACE->m_monitor;
 
         for (auto const& w : Desktop::windowState()->windows()) {
-            if (w && w->m_workspace == getSpace()->workspace() && !isFullscreen(w->m_target) && !w->m_pinned) {
-                w->m_allowedOverFullscreen = !SET;
+            if (w && w->m_workspace == getSpace()->workspace() && !isFullscreen(w->windowTarget()) && !(w->m_state & Desktop::View::WINDOW_STATE_PINNED)) {
+                w->fullscreenPolicy().setAllowedOverFullscreen(!SET);
                 w->updateFullscreenInputState();
             }
         }
         for (auto const& ls : Desktop::layerState()->layers()) {
-            if (ls->m_monitor == MONITOR)
-                ls->m_aboveFullscreen = false;
+            if (ls->m_monitor != MONITOR)
+                continue;
+
+            ls->m_flags &= ~Desktop::View::LAYER_FLAG_ABOVE_FULLSCREEN;
         }
     };
 
     const auto clear_hiddenFloatingWindowsUnderFSWindow = [&]() {
         m_fullscreenWindowHidingState.hiddenFloatingWindowsUnderFSWindow.clear();
         if (!m_fullscreenWindowHidingState.hiddenFloatingWindowsUnderFSWindow.empty())
-            Log::logger->log(
-                Log::WARN,
+            LOG(Log::WARN,
                 "hiddenFloatingWindowsUnderFSWindow.clear() failed. Will likely cause the mishandling of floating window hiding upon fullscreening on scrolling layout. This is an "
                 "error but is not critical.");
     };
@@ -369,9 +374,9 @@ void CScrollingFullscreenHandler::setNoMembersAboveFullscreen(const std::optiona
 
     if (!COVERING_FS_WINDOW && LAYOUT_TILED_COVERING_FS_WINDOW) {
         // This means that controller doesn't recognise tiled layout handled FS window as fullscreen.
-        Log::logger->log(Log::WARN,
-                         "Workspace doesn't recognise a tiled layout handled fullscreen/maximised window as such! This is a an error! We will attempt to recover by ignoring "
-                         "the request to setNoMembersAboveFullscreen");
+        LOG(Log::WARN,
+            "Workspace doesn't recognise a tiled layout handled fullscreen/maximised window as such! This is a an error! We will attempt to recover by ignoring "
+            "the request to setNoMembersAboveFullscreen");
         return;
     }
 
@@ -391,8 +396,7 @@ void CScrollingFullscreenHandler::setNoMembersAboveFullscreen(const std::optiona
 
     // There's only a floating FS window - which is always default handled
     if (COVERING_FS_WINDOW && !LAYOUT_TILED_COVERING_FS_WINDOW) {
-        Log::logger->log(Log::WARN,
-                         "non-scroll-handled FS window called CScrollingFullscreenHandler::setNoMembersAboveFullscreen(). This is a bug, but is not fatal. Recovering...");
+        LOG(Log::WARN, "non-scroll-handled FS window called CScrollingFullscreenHandler::setNoMembersAboveFullscreen(). This is a bug, but is not fatal. Recovering...");
 
         clear_hiddenFloatingWindowsUnderFSWindow();
         setNoMembersAboveFS_layoutUnaware(true);
@@ -417,25 +421,25 @@ void CScrollingFullscreenHandler::setNoMembersAboveFullscreen(const std::optiona
                 if (!w || w->m_workspace != getSpace()->workspace())
                     continue;
 
-                if (w != COVERING_FS_WINDOW && !w->m_pinned) {
+                if (w != COVERING_FS_WINDOW && !(w->m_state & Desktop::View::WINDOW_STATE_PINNED)) {
                     // If it the window was hidden when the UNDERLYING_FS_WINDOW was FSed, or it is a tiled window; it remains hidden. else, it is allowed ontop of it
-                    w->m_allowedOverFullscreen = w->m_isFloating && !m_fullscreenWindowHidingState.hiddenFloatingWindowsUnderFSWindow.contains(w);
+                    w->fullscreenPolicy().setAllowedOverFullscreen(w->isFloating() && !m_fullscreenWindowHidingState.hiddenFloatingWindowsUnderFSWindow.contains(w));
                     w->updateFullscreenInputState();
                 }
             }
             for (auto const& ls : Desktop::layerState()->layers()) {
                 if (ls->m_monitor == MONITOR)
-                    ls->m_aboveFullscreen = false;
+                    ls->m_flags &= ~Desktop::View::LAYER_FLAG_ABOVE_FULLSCREEN;
             }
 
             return;
         }
     }
 
-    Log::logger->log(Log::ERR,
-                     "setNoMembersAboveFullscreen() failed to correctly execute. Current FS window: {} Current Tiled layout handled FS window: {} Current last focused tiled "
-                     "layout handled FS window: {}",
-                     COVERING_FS_WINDOW, LAYOUT_TILED_COVERING_FS_WINDOW, LAST_SCROLL_HANDLED_TILED_FS_WINDOW);
+    LOG(Log::ERR,
+        "setNoMembersAboveFullscreen() failed to correctly execute. Current FS window: {} Current Tiled layout handled FS window: {} Current last focused tiled "
+        "layout handled FS window: {}",
+        COVERING_FS_WINDOW, LAYOUT_TILED_COVERING_FS_WINDOW, LAST_SCROLL_HANDLED_TILED_FS_WINDOW);
 }
 
 void CScrollingFullscreenHandler::syncFullscreenTargets() {
@@ -497,10 +501,10 @@ void CScrollingFullscreenHandler::syncFullscreenTargets() {
         }
 
         // If ITarget's underlying type is CWindowGroupTarget; only store the current window, NOT the whole group
-        if (TARGET->type() == Layout::TARGET_TYPE_GROUP || (TARGET->window()->m_group && TARGET->window()->m_group->current()->m_target != TARGET)) {
-            Log::logger->log(Log::WARN, "Handler tracked a window group. This should have never happened. Recovering...");
+        if (TARGET->type() == Layout::TARGET_TYPE_GROUP || (TARGET->window()->grouping().group() && TARGET->window()->grouping().group()->current()->windowTarget() != TARGET)) {
+            LOG(Log::WARN, "Handler tracked a window group. This should have never happened. Recovering...");
 
-            const auto WINDOWTARGET = TARGET->window()->m_target;
+            const auto WINDOWTARGET = TARGET->window()->windowTarget();
             const auto NEXT         = std::next(it);
             removeFsTarget(TARGET, true);
             it = NEXT;
@@ -542,7 +546,7 @@ void CScrollingFullscreenHandler::removeFsTarget(SP<Layout::ITarget> target, con
             TDATA->column->setColumnWidth(ITR->second.restoreColumnWidth.value());
     }
     if (target->window())
-        target->window()->m_layoutFlags.cantLockCursor = false;
+        target->window()->windowTarget()->setCantLockCursor(false);
     m_fsTargets.erase(ITR);
 
     if (!recursionGuard)
@@ -575,13 +579,13 @@ void CScrollingFullscreenHandler::sScrollingDataRecalculateHelper(const SP<Layou
 
     // check that LAST_FS_LAYOUTMANAGED_TILED_WINDOW was not unfullscreened
     const bool scrollingAwayFromCoveringFsWindow = LAST_FS_LAYOUT_HANDLED_TILED_WINDOW &&
-        getFullscreenModes(LAST_FS_LAYOUT_HANDLED_TILED_WINDOW->m_target).internal != FSMODE_NONE &&
+        getFullscreenModes(LAST_FS_LAYOUT_HANDLED_TILED_WINDOW->layoutTarget()).internal != FSMODE_NONE &&
         // Current widnow is not FS or it's not the same FS window we were on
         (!CURRENT_COVERING_FS_TDATA || LAST_FS_LAYOUT_HANDLED_TILED_WINDOW != CURRENT_LAYOUT_HANDLED_FS_WINDOW);
 
     // If scrolling away from or unFsing the covering FS window
     const bool coveringFsWindowStateNegative = scrollingAwayFromCoveringFsWindow ||
-        (!CURRENT_COVERING_FS_TDATA && LAST_FS_LAYOUT_HANDLED_TILED_WINDOW && getFullscreenModes(LAST_FS_LAYOUT_HANDLED_TILED_WINDOW->m_target).internal == FSMODE_NONE);
+        (!CURRENT_COVERING_FS_TDATA && LAST_FS_LAYOUT_HANDLED_TILED_WINDOW && getFullscreenModes(LAST_FS_LAYOUT_HANDLED_TILED_WINDOW->layoutTarget()).internal == FSMODE_NONE);
 
     /*
         Refreshing window rules and decos
@@ -591,20 +595,18 @@ void CScrollingFullscreenHandler::sScrollingDataRecalculateHelper(const SP<Layou
     if (coveringFsWindowStatePositive) {
 
         // If window group, get the current window
-        const auto LAST_FS_WINDOW_TARGET = CURRENT_COVERING_FS_TDATA->target->window()->m_target;
+        const auto LAST_FS_WINDOW_TARGET = CURRENT_COVERING_FS_TDATA->target->window()->windowTarget();
 
         // Needn't set pos/size here as recalc correctly handles accounting for reserved areas, etc...
         // We need to update the application of window rules here
         updateTargetRulesAndDecos(LAST_FS_WINDOW_TARGET);
     }
     // Scrolling away from an FS window
-    else if (coveringFsWindowStateNegative) {
-
-        updateTargetRulesAndDecos(LAST_FS_LAYOUT_HANDLED_TILED_WINDOW->m_target);
-    }
+    else if (coveringFsWindowStateNegative)
+        updateTargetRulesAndDecos(LAST_FS_LAYOUT_HANDLED_TILED_WINDOW->windowTarget());
 
     /*
-        Setting DS and VRR 
+        Setting DS and VRR
     */
 
     // If a window is being un-FSed, set its DS and VRR in requestFullscreen()
@@ -616,7 +618,6 @@ void CScrollingFullscreenHandler::sScrollingDataRecalculateHelper(const SP<Layou
     // If we are scrolling away from a layout managed tiled FS window, send it a regular tranche
     // we need only check its internal state as if the window was saved in lastTiledLayoutManagedFsWindow, it is guaranteed to be as its name suggests
     if (scrollingAwayFromCoveringFsWindow) {
-
         // send a regular tranche
         // ignore if DS is disabled.
         if ((*PDIRECTSCANOUT == 1 || (*PDIRECTSCANOUT == 2 && LAST_FS_LAYOUT_HANDLED_TILED_WINDOW->getContentType() == NContentType::CONTENT_TYPE_GAME))) {
@@ -649,9 +650,9 @@ void CScrollingFullscreenHandler::sScrollingDataRecalculateHelper(const SP<Layou
             if (!w || w->m_workspace != getSpace()->workspace())
                 continue;
 
-            if (w != CURRENT_LAYOUT_HANDLED_FS_WINDOW && !w->m_pinned) {
+            if (w != CURRENT_LAYOUT_HANDLED_FS_WINDOW && !(w->m_state & Desktop::View::WINDOW_STATE_PINNED)) {
                 // If it the window was hidden when the UNDERLYING_FS_WINDOW was FSed, or it is a tiled window; it remains hidden. else, it is allowed ontop of it
-                if (w->m_allowedOverFullscreen != (w->m_isFloating && !m_fullscreenWindowHidingState.hiddenFloatingWindowsUnderFSWindow.contains(w)))
+                if (w->isAllowedOverFullscreen() != (w->isFloating() && !m_fullscreenWindowHidingState.hiddenFloatingWindowsUnderFSWindow.contains(w)))
                     return true;
             }
         }
@@ -674,10 +675,10 @@ void CScrollingFullscreenHandler::sScrollingDataRecalculateHelper(const SP<Layou
             DS and VRR setting must run before setNoMembersAboveFullscreen() because we need the last tiled layout managed fullscreen window before it is reset when no fullscreen
 
             It is IMPERATIVE that setNoMembersAboveFullscreen() is NOT called before this when FSing or unFSing a window. We need the information about the prev/current FS window to survive till here!
-        
+
             If window group, gets the current window
         */
-        setNoMembersAboveFullscreen(CURRENT_COVERING_FS_TDATA ? CURRENT_COVERING_FS_TDATA->target->window()->m_target : nullptr);
+        setNoMembersAboveFullscreen(CURRENT_COVERING_FS_TDATA ? CURRENT_COVERING_FS_TDATA->target->window()->layoutTarget() : nullptr);
         // Must run after setNoMembersAboveFullscreen() so it can properly set the windows' allowedOverFullscreen attributes
         updateFullscreenFade(sc<bool>(CURRENT_COVERING_FS_TDATA));
     }
@@ -688,7 +689,7 @@ void CScrollingFullscreenHandler::saveCurrentFsAndAllHiddenFloatingWindows(PHLWI
     // keep logic here in sync with setNoMembersAboveFullscreen()
 
     m_fullscreenWindowHidingState.lastTiledLayoutManagedFsWindow     = fullscreenWindow;
-    m_fullscreenWindowHidingState.lastTiledLayoutManagedFsWindowMode = getFullscreenModes(fullscreenWindow->m_target).internal;
+    m_fullscreenWindowHidingState.lastTiledLayoutManagedFsWindowMode = getFullscreenModes(fullscreenWindow->windowTarget()).internal;
 
     const auto WORKSPACE = fullscreenWindow->m_workspace;
 
@@ -697,7 +698,7 @@ void CScrollingFullscreenHandler::saveCurrentFsAndAllHiddenFloatingWindows(PHLWI
         if (!w || w->m_workspace != getSpace()->workspace())
             continue;
 
-        if (w != fullscreenWindow && !w->m_pinned && w->m_isFloating)
+        if (w != fullscreenWindow && !(w->m_state & Desktop::View::WINDOW_STATE_PINNED) && w->isFloating())
             m_fullscreenWindowHidingState.hiddenFloatingWindowsUnderFSWindow.emplace(w);
     }
 }
@@ -757,7 +758,7 @@ void CScrollingFullscreenHandler::updateFullscreenFade(bool coversMonitor) {
             if (!fs.first)
                 continue;
             if (fs.first->window())
-                fs.first->window()->m_layoutFlags.cantLockCursor = true;
+                fs.first->window()->windowTarget()->setCantLockCursor(true);
         }
     } else {
         for (const auto& fs : m_fsTargets) {
@@ -765,7 +766,7 @@ void CScrollingFullscreenHandler::updateFullscreenFade(bool coversMonitor) {
                 continue;
 
             if (fs.first->window())
-                fs.first->window()->m_layoutFlags.cantLockCursor = false;
+                fs.first->window()->windowTarget()->setCantLockCursor(false);
         }
     }
 

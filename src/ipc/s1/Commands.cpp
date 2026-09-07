@@ -1,5 +1,10 @@
 #include "Commands.hpp"
+#include "../../desktop/view/window/WindowFullscreenPolicy.hpp"
+#include "../../desktop/view/window/WindowGroupMembership.hpp"
+#include "../../desktop/view/window/WindowPresentation.hpp"
+#include "../../desktop/view/window/WindowSwallowController.hpp"
 #include "../../output/Monitor.hpp"
+#include "../../pointer/PointerManager.hpp"
 
 #include <algorithm>
 #include <array>
@@ -45,6 +50,7 @@ using namespace Hyprutils::String;
 #include "../../helpers/MiscFunctions.hpp"
 #include "../../keybinds/Manager.hpp"
 #include "../../helpers/SystemInfo.hpp"
+#include "../../helpers/string/StringUtils.hpp"
 #include "../../desktop/view/LayerSurface.hpp"
 #include "../../desktop/view/Group.hpp"
 #include "../../desktop/rule/Engine.hpp"
@@ -205,6 +211,9 @@ std::string CCommandFormatter::getMonitorData(PHLMONITOR m, eHyprCtlOutputFormat
     if (!m->m_output || m->m_id == -1)
         return "";
 
+    static auto tf = [](bool t) -> const char* { return t ? "true" : "false"; };
+    static auto yn = [](bool t) -> const char* { return t ? "yes" : "no"; };
+
     if (format == eHyprCtlOutputFormat::FORMAT_JSON) {
 
         result += std::format(
@@ -251,7 +260,14 @@ std::string CCommandFormatter::getMonitorData(PHLMONITOR m, eHyprCtlOutputFormat
     "sdrSaturation": {},
     "sdrMinLuminance": {},
     "sdrMaxLuminance": {},
-    "hardwareCursorsInUse": {}
+    "hardwareCursorsInUse": {},
+    "hardwareDetails": {{
+        "backend": "{}",
+        "hdr": {},
+        "chroma": {},
+        "bt2020": {},
+        "vrrCapable": {}
+    }}
 }},)#",
 
             m->m_id, escapeJSONStrings(m->m_name), escapeJSONStrings(m->m_shortDescription), escapeJSONStrings(m->m_output->make), escapeJSONStrings(m->m_output->model),
@@ -259,13 +275,13 @@ std::string CCommandFormatter::getMonitorData(PHLMONITOR m, eHyprCtlOutputFormat
             sc<int>(m->m_output->physicalSize.y), m->m_refreshRate, sc<int>(m->m_position.x), sc<int>(m->m_position.y), m->activeWorkspaceID(),
             (!m->m_activeWorkspace ? "" : escapeJSONStrings(m->m_activeWorkspace->m_name)), m->activeSpecialWorkspaceID(),
             escapeJSONStrings(m->m_activeSpecialWorkspace ? m->m_activeSpecialWorkspace->m_name : ""), sc<int>(m->m_reservedArea.left()), sc<int>(m->m_reservedArea.top()),
-            sc<int>(m->m_reservedArea.right()), sc<int>(m->m_reservedArea.bottom()), m->m_scale, sc<int>(m->m_transform),
-            (m == Desktop::focusState()->monitor() ? "true" : "false"), (m->m_dpmsStatus ? "true" : "false"), (m->m_output->state->state().adaptiveSync ? "true" : "false"),
-            rc<uint64_t>(m->m_solitaryClient.get()), getSolitaryBlockedReason(m, format), (m->m_tearingState.activelyTearing ? "true" : "false"),
-            getTearingBlockedReason(m, format), rc<uint64_t>(m->m_lastScanout.get()), getDSBlockedReason(m, format), (m->m_enabled ? "false" : "true"),
+            sc<int>(m->m_reservedArea.right()), sc<int>(m->m_reservedArea.bottom()), m->m_scale, sc<int>(m->m_transform), tf(m == Desktop::focusState()->monitor()),
+            tf(m->m_dpmsStatus), tf(m->m_output->state->state().adaptiveSync), rc<uint64_t>(m->m_solitaryClient.get()), getSolitaryBlockedReason(m, format),
+            tf(m->m_tearingState.activelyTearing), getTearingBlockedReason(m, format), rc<uint64_t>(m->m_lastScanout.get()), getDSBlockedReason(m, format), tf(m->m_enabled),
             formatToString(m->m_output->state->state().drmFormat), m->m_mirrorOf ? std::format("{}", m->m_mirrorOf->m_id) : "none", availableModesForOutput(m, format),
-            (NCMType::toString(m->m_cmType)), (m->m_sdrBrightness), (m->m_sdrSaturation), (m->m_sdrMinLuminance), (m->m_sdrMaxLuminance),
-            (!m->shouldUseSoftwareCursors() ? "true" : "false"));
+            (NCMType::toString(m->m_cmType)), (m->m_sdrBrightness), (m->m_sdrSaturation), (m->m_sdrMinLuminance), (m->m_sdrMaxLuminance), tf(!m->shouldUseSoftwareCursors()),
+            StringUtils::backendStr(m->m_output->getBackend()->type()), tf(m->m_output->parsedEDID.hdrMetadata.has_value()),
+            tf(m->m_output->parsedEDID.chromaticityCoords.has_value()), tf(m->m_output->parsedEDID.supportsBT2020), tf(m->m_output->vrrCapable));
 
     } else {
         result += std::format(
@@ -275,7 +291,7 @@ std::string CCommandFormatter::getMonitorData(PHLMONITOR m, eHyprCtlOutputFormat
             "{:x}\n\tdirectScanoutBlockedBy: {}\n\tdisabled: "
             "{}\n\tcurrentFormat: {}\n\tmirrorOf: "
             "{}\n\tavailableModes: {}\n\tcolorManagementPreset: {}\n\tsdrBrightness: {}\n\tsdrSaturation: {}\n\tsdrMinLuminance: {}\n\tsdrMaxLuminance: "
-            "{}\n\thardwareCursorsInUse: {}\n\n",
+            "{}\n\thardwareCursorsInUse: {}\n\thardwareDetails:\n\t\tbackend: {}\n\t\thdr: {}\n\t\tchroma: {}\n\t\tbt2020: {}\n\t\tvrrCapable: {}\n\n",
             m->m_name, m->m_id, sc<int>(m->m_pixelSize.x), sc<int>(m->m_pixelSize.y), m->m_refreshRate, sc<int>(m->m_position.x), sc<int>(m->m_position.y), m->m_shortDescription,
             m->m_output->make, m->m_output->model, sc<int>(m->m_output->physicalSize.x), sc<int>(m->m_output->physicalSize.y), m->m_output->serial, m->activeWorkspaceID(),
             (!m->m_activeWorkspace ? "" : m->m_activeWorkspace->m_name), m->activeSpecialWorkspaceID(), (m->m_activeSpecialWorkspace ? m->m_activeSpecialWorkspace->m_name : ""),
@@ -284,7 +300,9 @@ std::string CCommandFormatter::getMonitorData(PHLMONITOR m, eHyprCtlOutputFormat
             rc<uint64_t>(m->m_solitaryClient.get()), getSolitaryBlockedReason(m, format), m->m_tearingState.activelyTearing, getTearingBlockedReason(m, format),
             rc<uint64_t>(m->m_lastScanout.get()), getDSBlockedReason(m, format), !m->m_enabled, formatToString(m->m_output->state->state().drmFormat),
             m->m_mirrorOf ? std::format("{}", m->m_mirrorOf->m_id) : "none", availableModesForOutput(m, format), (NCMType::toString(m->m_cmType)), (m->m_sdrBrightness),
-            (m->m_sdrSaturation), (m->m_sdrMinLuminance), (m->m_sdrMaxLuminance), (!m->shouldUseSoftwareCursors()));
+            (m->m_sdrSaturation), (m->m_sdrMinLuminance), (m->m_sdrMaxLuminance), (!m->shouldUseSoftwareCursors()), StringUtils::backendStr(m->m_output->getBackend()->type()),
+            yn(m->m_output->parsedEDID.hdrMetadata.has_value()), yn(m->m_output->parsedEDID.chromaticityCoords.has_value()), yn(m->m_output->parsedEDID.supportsBT2020),
+            yn(m->m_output->vrrCapable));
     }
 
     return result;
@@ -335,18 +353,18 @@ static std::string getTagsData(PHLWINDOW w, eHyprCtlOutputFormat format) {
 
 static std::string getGroupedData(PHLWINDOW w, eHyprCtlOutputFormat format) {
     const bool isJson = format == eHyprCtlOutputFormat::FORMAT_JSON;
-    if (!w->m_group)
+    if (!w->grouping().group())
         return isJson ? "" : "0";
 
     std::ostringstream result;
 
-    for (const auto& curr : w->m_group->windows()) {
+    for (const auto& curr : w->grouping().group()->windows()) {
         if (isJson)
             result << std::format("\"0x{:x}\"", rc<uintptr_t>(curr.get()));
         else
             result << std::format("{:x}", rc<uintptr_t>(curr.get()));
 
-        if (curr != w->m_group->windows().back())
+        if (curr != w->grouping().group()->windows().back())
             result << (isJson ? ", " : ",");
     }
 
@@ -362,6 +380,9 @@ std::string CCommandFormatter::getWindowData(PHLWINDOW w, eHyprCtlOutputFormat f
         }
         return -1;
     };
+
+    const auto METADATA = w->backend().metadata();
+    const bool VISIBLE  = w->mapped() && w->acceptsInput() && w->alphaNonZero();
 
     if (format == eHyprCtlOutputFormat::FORMAT_JSON) {
         return std::format(
@@ -402,17 +423,18 @@ std::string CCommandFormatter::getWindowData(PHLWINDOW w, eHyprCtlOutputFormat f
     "tearingHint": {},
     "stableId": "{:x}"
 }},)#",
-            rc<uintptr_t>(w.get()), (w->m_isMapped ? "true" : "false"), (w->isHidden() ? "true" : "false"), (w->visible() ? "true" : "false"),
-            (w->acceptsInput() ? "true" : "false"), sc<int>(w->position(Desktop::View::IGeometric::GEOMETRIC_GOAL).x),
-            sc<int>(w->position(Desktop::View::IGeometric::GEOMETRIC_GOAL).y), sc<int>(w->size(Desktop::View::IGeometric::GEOMETRIC_GOAL).x),
-            sc<int>(w->size(Desktop::View::IGeometric::GEOMETRIC_GOAL).y), w->m_workspace ? w->workspaceID() : WORKSPACE_INVALID,
-            escapeJSONStrings(!w->m_workspace ? "" : w->m_workspace->m_name), (sc<int>(w->m_isFloating) == 1 ? "true" : "false"), w->monitorID(), escapeJSONStrings(w->m_class),
-            escapeJSONStrings(w->m_title), escapeJSONStrings(w->m_initialClass), escapeJSONStrings(w->m_initialTitle), w->getPID(), (sc<int>(w->m_isX11) == 1 ? "true" : "false"),
-            (w->m_pinned ? "true" : "false"), (w->m_pinFullscreened ? "true" : "false"), sc<uint8_t>(Fullscreen::controller()->getFullscreenModes(w).internal),
-            sc<uint8_t>(Fullscreen::controller()->getFullscreenModes(w).client), escapeJSONStrings(Fullscreen::controller()->getFullscreenHandlerNameAsString(w)),
-            (w->m_allowedOverFullscreen ? "true" : "false"), getGroupedData(w, format), getTagsData(w, format), rc<uintptr_t>(w->m_swallowee.get()), getFocusHistoryID(w),
-            (g_pInputManager->isWindowInhibiting(w, false) ? "true" : "false"), escapeJSONStrings(w->xdgTag().value_or("")), escapeJSONStrings(w->xdgDescription().value_or("")),
-            escapeJSONStrings(NContentType::toString(w->getContentType())), (w->m_tearingHint ? "true" : "false"), w->m_stableID);
+            rc<uintptr_t>(w.get()), (w->mapped() ? "true" : "false"), (w->isHidden() ? "true" : "false"), (VISIBLE ? "true" : "false"), (w->acceptsInput() ? "true" : "false"),
+            sc<int>(w->position(Desktop::View::IGeometric::GEOMETRIC_GOAL).x), sc<int>(w->position(Desktop::View::IGeometric::GEOMETRIC_GOAL).y),
+            sc<int>(w->size(Desktop::View::IGeometric::GEOMETRIC_GOAL).x), sc<int>(w->size(Desktop::View::IGeometric::GEOMETRIC_GOAL).y),
+            w->m_workspace ? w->workspaceID() : WORKSPACE_INVALID, escapeJSONStrings(!w->m_workspace ? "" : w->m_workspace->m_name),
+            (sc<int>(w->isFloating()) == 1 ? "true" : "false"), w->monitorID(), escapeJSONStrings(w->metadata().appID()), escapeJSONStrings(w->metadata().title()),
+            escapeJSONStrings(w->metadata().initialAppID()), escapeJSONStrings(w->metadata().initialTitle()), w->backend().pid(), (w->backend().isX11() ? "true" : "false"),
+            ((w->m_state & Desktop::View::WINDOW_STATE_PINNED) ? "true" : "false"), (w->fullscreenPolicy().pinFullscreened() ? "true" : "false"),
+            sc<uint8_t>(Fullscreen::controller()->getFullscreenModes(w).internal), sc<uint8_t>(Fullscreen::controller()->getFullscreenModes(w).client),
+            escapeJSONStrings(Fullscreen::controller()->getFullscreenHandlerNameAsString(w)), (w->fullscreenPolicy().allowedOverFullscreen() ? "true" : "false"),
+            getGroupedData(w, format), getTagsData(w, format), rc<uintptr_t>(w->swallowing().swallowee().get()), getFocusHistoryID(w),
+            (g_pInputManager->isWindowInhibiting(w, false) ? "true" : "false"), escapeJSONStrings(METADATA.tag.value_or("")), escapeJSONStrings(METADATA.description.value_or("")),
+            escapeJSONStrings(NContentType::toString(w->getContentType())), ((w->m_hints & Desktop::View::WINDOW_HINT_TEAR) ? "true" : "false"), w->metadata().stableID());
     } else {
         return std::format(
             "Window {:x} -> {}:\n\tmapped: {}\n\thidden: {}\n\tvisible: {}\n\tacceptsInput: {}\n\tat: {},{}\n\tsize: {},{}\n\tworkspace: {} ({})\n\tfloating: {}\n\tmonitor: "
@@ -423,15 +445,17 @@ std::string CCommandFormatter::getWindowData(PHLWINDOW w, eHyprCtlOutputFormat f
             "{}\n\tinhibitingIdle: "
             "{}\n\txdgTag: "
             "{}\n\txdgDescription: {}\n\tcontentType: {}\n\ttearingHint: {}\n\tstableID: {:x}\n\n",
-            rc<uintptr_t>(w.get()), w->m_title, sc<int>(w->m_isMapped), sc<int>(w->isHidden()), sc<int>(w->visible()), sc<int>(w->acceptsInput()),
+            rc<uintptr_t>(w.get()), w->metadata().title(), sc<int>(w->mapped()), sc<int>(w->isHidden()), sc<int>(VISIBLE), sc<int>(w->acceptsInput()),
             sc<int>(w->position(Desktop::View::IGeometric::GEOMETRIC_GOAL).x), sc<int>(w->position(Desktop::View::IGeometric::GEOMETRIC_GOAL).y),
             sc<int>(w->size(Desktop::View::IGeometric::GEOMETRIC_GOAL).x), sc<int>(w->size(Desktop::View::IGeometric::GEOMETRIC_GOAL).y),
-            w->m_workspace ? w->workspaceID() : WORKSPACE_INVALID, (!w->m_workspace ? "" : w->m_workspace->m_name), sc<int>(w->m_isFloating), w->monitorID(), w->m_class,
-            w->m_title, w->m_initialClass, w->m_initialTitle, w->getPID(), sc<int>(w->m_isX11), sc<int>(w->m_pinned), sc<int>(w->m_pinFullscreened),
+            w->m_workspace ? w->workspaceID() : WORKSPACE_INVALID, (!w->m_workspace ? "" : w->m_workspace->m_name), sc<int>(w->isFloating()), w->monitorID(), w->metadata().appID(),
+            w->metadata().title(), w->metadata().initialAppID(), w->metadata().initialTitle(), w->backend().pid(), sc<int>(w->backend().isX11()),
+            sc<int>(sc<bool>(w->m_state & Desktop::View::WINDOW_STATE_PINNED)), sc<int>(w->fullscreenPolicy().pinFullscreened()),
             sc<uint8_t>(Fullscreen::controller()->getFullscreenModes(w).internal), sc<uint8_t>(Fullscreen::controller()->getFullscreenModes(w).client),
-            Fullscreen::controller()->getFullscreenHandlerNameAsString(w), sc<int>(w->m_allowedOverFullscreen), getGroupedData(w, format), getTagsData(w, format),
-            rc<uintptr_t>(w->m_swallowee.get()), getFocusHistoryID(w), sc<int>(g_pInputManager->isWindowInhibiting(w, false)), w->xdgTag().value_or(""),
-            w->xdgDescription().value_or(""), NContentType::toString(w->getContentType()), sc<int>(w->m_tearingHint), w->m_stableID);
+            Fullscreen::controller()->getFullscreenHandlerNameAsString(w), sc<int>(w->fullscreenPolicy().allowedOverFullscreen()), getGroupedData(w, format),
+            getTagsData(w, format), rc<uintptr_t>(w->swallowing().swallowee().get()), getFocusHistoryID(w), sc<int>(g_pInputManager->isWindowInhibiting(w, false)),
+            METADATA.tag.value_or(""), METADATA.description.value_or(""), NContentType::toString(w->getContentType()),
+            sc<int>(sc<bool>(w->m_hints & Desktop::View::WINDOW_HINT_TEAR)), w->metadata().stableID());
     }
 }
 
@@ -442,7 +466,7 @@ static std::string clientsRequest(const SRequest& request) {
         result += "[";
 
         for (auto const& w : Desktop::windowState()->windows()) {
-            if (!w->m_isMapped && !request.all)
+            if (!w->mapped() && !request.all)
                 continue;
 
             result += CCommandFormatter::getWindowData(w, format);
@@ -453,7 +477,7 @@ static std::string clientsRequest(const SRequest& request) {
         result += "]";
     } else {
         for (auto const& w : Desktop::windowState()->windows()) {
-            if (!w->m_isMapped && !request.all)
+            if (!w->mapped() && !request.all)
                 continue;
 
             result += CCommandFormatter::getWindowData(w, format);
@@ -490,13 +514,14 @@ std::string CCommandFormatter::getWorkspaceData(PHLWORKSPACE w, eHyprCtlOutputFo
 }})#",
                            w->m_id, escapeJSONStrings(w->m_name), escapeJSONStrings(PMONITOR ? PMONITOR->m_name : "?"),
                            escapeJSONStrings(PMONITOR ? std::to_string(PMONITOR->m_id) : "null"), w->getWindowCount(),
-                           Fullscreen::controller()->hasFullscreen(w) ? "true" : "false", rc<uintptr_t>(PLASTW.get()), PLASTW ? escapeJSONStrings(PLASTW->m_title) : "",
+                           Fullscreen::controller()->hasFullscreen(w) ? "true" : "false", rc<uintptr_t>(PLASTW.get()), PLASTW ? escapeJSONStrings(PLASTW->metadata().title()) : "",
                            w->isPersistent() ? "true" : "false", escapeJSONStrings(layoutName));
     } else {
         return std::format("workspace ID {} ({}) on monitor {}:\n\tmonitorID: {}\n\twindows: {}\n\thasfullscreen: {}\n\tlastwindow: 0x{:x}\n\tlastwindowtitle: {}\n\tispersistent: "
                            "{}\n\ttiledLayout: {}\n\n",
                            w->m_id, w->m_name, PMONITOR ? PMONITOR->m_name : "?", PMONITOR ? std::to_string(PMONITOR->m_id) : "null", w->getWindowCount(),
-                           sc<int>(Fullscreen::controller()->hasFullscreen(w)), rc<uintptr_t>(PLASTW.get()), PLASTW ? PLASTW->m_title : "", sc<int>(w->isPersistent()), layoutName);
+                           sc<int>(Fullscreen::controller()->hasFullscreen(w)), rc<uintptr_t>(PLASTW.get()), PLASTW ? PLASTW->metadata().title() : "", sc<int>(w->isPersistent()),
+                           layoutName);
     }
 }
 
@@ -518,7 +543,6 @@ static std::string getWorkspaceRuleData(const Config::CWorkspaceRule& r, eHyprCt
         const std::string rounding    = sc<bool>(r.m_noRounding) ? std::format(",\n    \"rounding\": {}", boolToString(!r.m_noRounding.value())) : "";
         const std::string decorate    = sc<bool>(r.m_decorate) ? std::format(",\n    \"decorate\": {}", boolToString(r.m_decorate.value())) : "";
         const std::string shadow      = sc<bool>(r.m_noShadow) ? std::format(",\n    \"shadow\": {}", boolToString(!r.m_noShadow.value())) : "";
-        const std::string wobble      = sc<bool>(r.m_noWobble) ? std::format(",\n    \"wobble\": {}", boolToString(!r.m_noWobble.value())) : "";
         const std::string defaultName = r.m_defaultName.has_value() ? std::format(",\n    \"defaultName\": \"{}\"", escapeJSONStrings(r.m_defaultName.value())) : "";
         const std::string onCreatedEmpty =
             r.m_onCreatedEmptyRunCmd.has_value() ? std::format(",\n    \"onCreatedEmpty\": \"{}\"", escapeJSONStrings(r.m_onCreatedEmptyRunCmd.value())) : "";
@@ -527,7 +551,7 @@ static std::string getWorkspaceRuleData(const Config::CWorkspaceRule& r, eHyprCt
     "workspaceString": "{}"{}{}{}{}{}{}{}{}{}{}{}{}{}
 }})#",
                                          escapeJSONStrings(r.m_workspaceString), enabled, monitor, default_, persistent, gapsIn, gapsOut, borderSize, border, rounding, decorate,
-                                         shadow, wobble, defaultName, onCreatedEmpty);
+                                         shadow, defaultName, onCreatedEmpty);
 
         return result;
     } else {
@@ -548,12 +572,11 @@ static std::string getWorkspaceRuleData(const Config::CWorkspaceRule& r, eHyprCt
         const std::string rounding       = std::format("\trounding: {}\n", sc<bool>(r.m_noRounding) ? boolToString(!r.m_noRounding.value()) : "<unset>");
         const std::string decorate       = std::format("\tdecorate: {}\n", sc<bool>(r.m_decorate) ? boolToString(r.m_decorate.value()) : "<unset>");
         const std::string shadow         = std::format("\tshadow: {}\n", sc<bool>(r.m_noShadow) ? boolToString(!r.m_noShadow.value()) : "<unset>");
-        const std::string wobble         = std::format("\twobble: {}\n", sc<bool>(r.m_noWobble) ? boolToString(!r.m_noWobble.value()) : "<unset>");
         const std::string defaultName    = std::format("\tdefaultName: {}\n", r.m_defaultName.value_or("<unset>"));
         const std::string onCreatedEmpty = std::format("\tonCreatedEmpty: {}\n", r.m_onCreatedEmptyRunCmd.value_or("<unset>"));
 
         std::string result = std::format("Workspace rule {}:\n{}{}{}{}{}{}{}{}{}{}{}{}{}\n", escapeJSONStrings(r.m_workspaceString), enabled, monitor, default_, persistent, gapsIn,
-                                         gapsOut, borderSize, border, rounding, decorate, shadow, wobble, defaultName, onCreatedEmpty);
+                                         gapsOut, borderSize, border, rounding, decorate, shadow, defaultName, onCreatedEmpty);
 
         return result;
     }
@@ -1224,7 +1247,7 @@ static std::string splashRequest(eHyprCtlOutputFormat format, std::string reques
 }
 
 static std::string cursorPosRequest(eHyprCtlOutputFormat format, std::string request) {
-    const auto CURSORPOS = g_pInputManager->getMouseCoordsInternal().floor();
+    const auto CURSORPOS = Pointer::mgr()->untransformedPosition().floor();
 
     if (format == eHyprCtlOutputFormat::FORMAT_NORMAL) {
         return std::format("{}, {}", sc<int>(CURSORPOS.x), sc<int>(CURSORPOS.y));
@@ -1423,17 +1446,17 @@ static std::string dispatchGetProp(eHyprCtlOutputFormat format, std::string requ
         static auto PGROUPACTIVELOCKEDCOL   = CConfigValue<Config::IComplexConfigValue>("group:col.border_locked_active");
         static auto PGROUPINACTIVELOCKEDCOL = CConfigValue<Config::IComplexConfigValue>("group:col.border_locked_inactive");
 
-        const bool  GROUPLOCKED = PWINDOW->m_group ? PWINDOW->m_group->locked() : false;
+        const bool  GROUPLOCKED = PWINDOW->grouping().group() ? PWINDOW->grouping().group()->locked() : false;
 
         if (active) {
             auto* const       ACTIVECOL            = (Config::CGradientValueData*)(PACTIVECOL.ptr());
             auto* const       NOGROUPACTIVECOL     = (Config::CGradientValueData*)(PNOGROUPACTIVECOL.ptr());
             auto* const       GROUPACTIVECOL       = (Config::CGradientValueData*)(PGROUPACTIVECOL.ptr());
             auto* const       GROUPACTIVELOCKEDCOL = (Config::CGradientValueData*)(PGROUPACTIVELOCKEDCOL.ptr());
-            const auto* const ACTIVECOLOR =
-                !PWINDOW->m_group ? (!(PWINDOW->m_groupRules & Desktop::View::GROUP_DENY) ? ACTIVECOL : NOGROUPACTIVECOL) : (GROUPLOCKED ? GROUPACTIVELOCKEDCOL : GROUPACTIVECOL);
+            const auto* const ACTIVECOLOR          = !PWINDOW->grouping().group() ? (!(PWINDOW->grouping().rules() & Desktop::View::GROUP_DENY) ? ACTIVECOL : NOGROUPACTIVECOL) :
+                                                                                    (GROUPLOCKED ? GROUPACTIVELOCKEDCOL : GROUPACTIVECOL);
 
-            std::string borderColorString = PWINDOW->m_ruleApplicator->activeBorderColor().valueOr(*ACTIVECOLOR).toString();
+            std::string       borderColorString = PWINDOW->m_ruleApplicator->activeBorderColor().valueOr(*ACTIVECOLOR).toString();
             if (FORMNORM)
                 return borderColorString;
             else
@@ -1443,8 +1466,8 @@ static std::string dispatchGetProp(eHyprCtlOutputFormat format, std::string requ
             auto* const       NOGROUPINACTIVECOL     = (Config::CGradientValueData*)(PNOGROUPINACTIVECOL.ptr());
             auto* const       GROUPINACTIVECOL       = (Config::CGradientValueData*)(PGROUPINACTIVECOL.ptr());
             auto* const       GROUPINACTIVELOCKEDCOL = (Config::CGradientValueData*)(PGROUPINACTIVELOCKEDCOL.ptr());
-            const auto* const INACTIVECOLOR          = !PWINDOW->m_group ? (!(PWINDOW->m_groupRules & Desktop::View::GROUP_DENY) ? INACTIVECOL : NOGROUPINACTIVECOL) :
-                                                                           (GROUPLOCKED ? GROUPINACTIVELOCKEDCOL : GROUPINACTIVECOL);
+            const auto* const INACTIVECOLOR = !PWINDOW->grouping().group() ? (!(PWINDOW->grouping().rules() & Desktop::View::GROUP_DENY) ? INACTIVECOL : NOGROUPINACTIVECOL) :
+                                                                             (GROUPLOCKED ? GROUPINACTIVELOCKEDCOL : GROUPINACTIVECOL);
 
             std::string       borderColorString = PWINDOW->m_ruleApplicator->inactiveBorderColor().valueOr(*INACTIVECOLOR).toString();
             if (FORMNORM)
@@ -1509,6 +1532,8 @@ static std::string dispatchGetProp(eHyprCtlOutputFormat format, std::string requ
         return windowPropToString(PWINDOW->m_ruleApplicator->noMaxSize());
     else if (PROP == "no_shadow")
         return windowPropToString(PWINDOW->m_ruleApplicator->noShadow());
+    else if (PROP == "no_glow")
+        return windowPropToString(PWINDOW->m_ruleApplicator->noGlow());
     else if (PROP == "no_wobble")
         return windowPropToString(PWINDOW->m_ruleApplicator->noWobble());
     else if (PROP == "no_shortcuts_inhibit")
@@ -1652,7 +1677,7 @@ static std::string decorationRequest(eHyprCtlOutputFormat format, std::string re
     std::string result = "";
     if (format == eHyprCtlOutputFormat::FORMAT_JSON) {
         result += "[";
-        for (auto const& wd : PWINDOW->m_windowDecorations) {
+        for (auto const& wd : PWINDOW->presentation().decorations()) {
             result += std::format("{{\n\"decorationName\": \"{}\",\n\"priority\": {}\n}},", wd->getDisplayName(), wd->getPositioningInfo().priority);
         }
 
@@ -1660,7 +1685,7 @@ static std::string decorationRequest(eHyprCtlOutputFormat format, std::string re
         result += "]";
     } else {
         result = +"Decoration\tPriority\n";
-        for (auto const& wd : PWINDOW->m_windowDecorations) {
+        for (auto const& wd : PWINDOW->presentation().decorations()) {
             result += std::format("{}\t{}\n", wd->getDisplayName(), wd->getPositioningInfo().priority);
         }
     }
@@ -1984,7 +2009,7 @@ void IPC::Socket1::refreshState() {
     }
 
     for (const auto& window : Desktop::windowState()->windows()) {
-        if (!window->m_isMapped || !window->m_workspace || !window->m_workspace->isVisible())
+        if (!window->mapped() || !window->m_workspace || !window->m_workspace->isVisible())
             continue;
 
         Desktop::Rule::ruleEngine()->updateAllRules();

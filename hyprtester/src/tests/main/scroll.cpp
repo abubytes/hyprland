@@ -741,9 +741,7 @@ TEST_CASE(scroll_LAYOUT_HANDLED_floatingWindowHiding) {
         Considerations for the test:
             allowedOverFullscreen is used for floating windows' visibility. It's not always set for tiled ones, and don't implact their visibility.
 
-            `visible` and `hidden` are not reliable since they are inconsistent. After they are fixed, they should be added to tested fields
-
-            acceptInput works since hidden windows don't accept input.
+            `visible` combines the mapped, input, and alpha state.
 
 
     */
@@ -766,6 +764,7 @@ TEST_CASE(scroll_LAYOUT_HANDLED_floatingWindowHiding) {
         ASSERT_CONTAINS(under, "floating: 1");
 
         ASSERT_CONTAINS(under, "allowedOverFullscreen: 0");
+        ASSERT_CONTAINS(under, "visible: 0");
         ASSERT_CONTAINS(under, "acceptsInput: 0");
 
         ASSERT_CONTAINS(under, "fullscreen: 0");
@@ -785,6 +784,7 @@ TEST_CASE(scroll_LAYOUT_HANDLED_floatingWindowHiding) {
         ASSERT_CONTAINS(tiledOne, "class: tiledOne");
         ASSERT_CONTAINS(tiledOne, "floating: 0");
 
+        ASSERT_CONTAINS(tiledOne, "visible: 1");
         ASSERT_CONTAINS(tiledOne, "acceptsInput: 1");
 
         ASSERT_CONTAINS(tiledOne, "fullscreen: 2");
@@ -2391,6 +2391,50 @@ TEST_CASE(scroll_DEFAULT_HANDLED_FullscreenNonInterference) {
 
 /* Scroll viewport tests */
 
+TEST_CASE(scrollNegativeScaleGesture) {
+    OK(getFromSocket("r/eval hl.config({ general = { layout = 'scrolling' } })"));
+    OK(getFromSocket("/eval hl.config({ scrolling = { follow_focus = false }, gestures = { scrolling = { move_snap_to_grid = false, move_snap_cursor = false } } })"));
+
+    // Move away from the tape boundary before testing the negative scale.
+    OK(getFromSocket("/eval hl.gesture({ fingers = 6, direction = 'left', action = 'scroll_move', scale = -2 })"));
+    OK(getFromSocket("/eval hl.gesture({ fingers = 7, direction = 'left', action = 'scroll_move', scale = 2 })"));
+    OK(getFromSocket("/eval hl.gesture({ fingers = 8, direction = 'left', action = 'scroll_move', scale = -1 })"));
+    OK(getFromSocket("/eval hl.gesture({ fingers = 9, direction = 'left', action = 'scroll_move', scale = 1 })"));
+
+    for (const auto& win : {"negative_scale_a", "negative_scale_b", "negative_scale_c", "negative_scale_d"})
+        SPAWN_KITTY(win);
+
+    const auto xCoordinate = [&](const std::string& window) {
+        const auto at = Tests::getAttribute(getClientBlock(getFromSocket("/clients"), window), "at");
+        return std::stoi(at.substr(0, at.find(',')));
+    };
+
+    const int pos = xCoordinate("negative_scale_a");
+
+    OK(getFromSocket("/eval hl.plugin.test.gesture('left', 7)"));
+    const int posPlus2 = xCoordinate("negative_scale_a");
+
+    // Test negative delta when moving the viewport in scrolling via a gesture.
+    OK(getFromSocket("/eval hl.plugin.test.gesture('left', 8)"));
+    const int posPlus1 = xCoordinate("negative_scale_a");
+
+    if (posPlus1 <= posPlus2)
+        FAIL_TEST("Expected a negative gesture scale to move the scrolling view right, from x={} to x={}", posPlus2, posPlus1);
+
+    // Return to the same tape position before comparing scale -2.
+    OK(getFromSocket("/eval hl.plugin.test.gesture('left', 9)"));
+    const int posPlus2Again = xCoordinate("negative_scale_a");
+
+    if (posPlus2Again != posPlus2)
+        FAIL_TEST("Expected scale 1 to reset the scrolling view from x={} to x={}, got x={}", posPlus1, posPlus2, posPlus2Again);
+
+    OK(getFromSocket("/eval hl.plugin.test.gesture('left', 6)"));
+    const int posAgain = xCoordinate("negative_scale_a");
+
+    if (posAgain != pos)
+        FAIL_TEST("Expected scale -2 to return the scrolling view from x={} to x={}, got x={}", posPlus2, pos, posAgain);
+}
+
 TEST_CASE(testScrollingViewBehaviourDispatchFocusWindowFollowFocusFalse) {
 
     /*
@@ -3120,6 +3164,64 @@ TEST_CASE(scrollTapeOnClickOutOfWindow) {
 
     if (posAx >= 0)
         FAIL_TEST("Expected the x coordinate of window of class \"A\" to be < 0, got {}.", posAx);
+}
+
+TEST_CASE(scrollTapeWithMouseClick) {
+
+    // follow_focus = true, follow_mouse = 2 --> test that mouse-down moves the view but does NOT move the viewport. mouse-up moves the viewport (only full click moves the viewport)
+
+    OK(getFromSocket("r/eval hl.config({ general = { layout = 'scrolling' } })"));
+    OK(getFromSocket("r/eval hl.config({ scrolling = { follow_focus = true } })"));
+    OK(getFromSocket("r/eval hl.config({ input = { follow_mouse = 2 } })"));
+
+    const auto ExpectViewportMoved = [&](bool moved) {
+        // if the view does not move, we expect the x coordinate of the window of class "a" to be negative, as it would be to the left of the viewport
+        const std::string posA  = Tests::getAttribute(getFromSocket("/activewindow"), "at");
+        const int         posAx = std::stoi(posA.substr(0, posA.find(',')));
+
+        if (moved ? (posAx < 0) : (posAx >= 0))
+            FAIL_TEST("Expected the x coordinate of window of class \"a\" to be {} 0, got {}.", moved ? ">=" : "<", posAx);
+    };
+
+    SPAWN_KITTY("wee");
+    OK(getFromSocket("r/dispatch hl.dsp.layout('colresize 0.8')"));
+
+    SPAWN_KITTY("woo");
+
+    // move it over wee
+    OK(getFromSocket("r/dispatch hl.dsp.cursor.move({ x = 100, y = 100 })"));
+
+    {
+        // expect focus to not to have moved
+        ASSERT_CONTAINS(getFromSocket("/activewindow"), "class: woo");
+
+        // expect viewport to not have moved
+        // still focused onver woo, so this should be >=0
+        ExpectViewportMoved(true);
+    }
+    OK(getFromSocket("r/dispatch hl.dsp.cursor.move({ x = 100, y = 100 })"));
+    OK(getFromSocket("/eval hl.plugin.test.click(272, 1)"));
+
+    {
+        // expect focus to be moved
+        ASSERT_CONTAINS(getFromSocket("/activewindow"), "class: wee");
+
+        // expect viewport to not have moved
+        // focused over wee now and it should be hidden in the left still
+        ExpectViewportMoved(false);
+    }
+
+    OK(getFromSocket("r/dispatch hl.dsp.cursor.move({ x = 100, y = 100 })"));
+    OK(getFromSocket("/eval hl.plugin.test.click(272, 0)"));
+
+    {
+        // expect focus to be moved
+        ASSERT_CONTAINS(getFromSocket("/activewindow"), "class: wee");
+
+        // expect viewport to have moved
+        // focused over wee now and since w is now supposed to have moved into view, it should no longer be hidden on the left. Combined with prev test block, this proves it moved
+        ExpectViewportMoved(true);
+    }
 }
 
 TEST_CASE(properFocusBehvaior) {

@@ -1,7 +1,7 @@
 #include "ScreenshareManager.hpp"
 #include "../../render/Renderer.hpp"
 #include "../../Compositor.hpp"
-#include "../../desktop/view/Window.hpp"
+#include "../../desktop/view/window/Window.hpp"
 #include "../../protocols/core/Seat.hpp"
 #include "../../event/EventBus.hpp"
 #include "../../state/MonitorState.hpp"
@@ -37,7 +37,7 @@ void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
     std::erase_if(m_sessions, [&](const WP<CScreenshareSession>& session) { return session.expired(); });
 
     if (!m_pendingFrames.empty())
-        LOGM(Log::TRACE, "[SSDBG] outputCommit mon={} id={} virt={} physical={} pending={} sessions={}", monitor ? monitor->m_name : "<none>", monitor ? monitor->m_id : -1,
+        LOG(Log::TRACE, "[SSDBG] outputCommit mon={} id={} virt={} physical={} pending={} sessions={}", monitor ? monitor->m_name : "<none>", monitor ? monitor->m_id : -1,
              monitor ? monitor->isVirtual() : false, monitor && monitor->physicalMonitor() ? monitor->physicalMonitor()->m_name : "<none>", m_pendingFrames.size(), m_sessions.size());
 
     // if no pending frames, and no sessions are sharing, then unblock ds
@@ -53,20 +53,20 @@ void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
 
     std::ranges::for_each(m_pendingFrames, [&](WP<CScreenshareFrame>& frame) {
         if (frame.expired()) {
-            LOGM(Log::TRACE, "[SSDBG] outputCommit skip expired frame commitMon={}", monitor ? monitor->m_name : "<none>");
+            LOG(Log::TRACE, "[SSDBG] outputCommit skip expired frame commitMon={}", monitor ? monitor->m_name : "<none>");
             return;
         }
 
         const bool FRAME_DONE = frame->done();
         if (!frame->m_shared || FRAME_DONE) {
-            LOGM(Log::TRACE, "[SSDBG] outputCommit skip frame commitMon={} shared={} done={} copied={} failed={}", monitor ? monitor->m_name : "<none>", frame->m_shared, FRAME_DONE,
+            LOG(Log::TRACE, "[SSDBG] outputCommit skip frame commitMon={} shared={} done={} copied={} failed={}", monitor ? monitor->m_name : "<none>", frame->m_shared, FRAME_DONE,
                  frame->m_copied, frame->m_failed);
             return;
         }
 
         const auto SESSIONMONITOR = frame->m_session->monitor();
         const bool MATCH          = isSameCommittedOutput(SESSIONMONITOR, monitor);
-        LOGM(Log::TRACE, "[SSDBG] outputCommit consider commitMon={} sessionMon={} sessionPhys={} match={} type={} damage={} {} {} {}", monitor ? monitor->m_name : "<none>",
+        LOG(Log::TRACE, "[SSDBG] outputCommit consider commitMon={} sessionMon={} sessionPhys={} match={} type={} damage={} {} {} {}", monitor ? monitor->m_name : "<none>",
              SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>", SESSIONMONITOR && SESSIONMONITOR->physicalMonitor() ? SESSIONMONITOR->physicalMonitor()->m_name : "<none>", MATCH,
              sc<int>(frame->m_session->m_type), frame->m_damage.getExtents().x, frame->m_damage.getExtents().y, frame->m_damage.getExtents().w, frame->m_damage.getExtents().h);
         if (!MATCH)
@@ -76,13 +76,13 @@ void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
             CBox geometry = frame->m_session->m_window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
             // Use the session monitor (virtual/split aware), not the physical commit monitor.
             if (geometry.intersection({SESSIONMONITOR->m_position, SESSIONMONITOR->m_size}).empty()) {
-                LOGM(Log::TRACE, "[SSDBG] outputCommit skip window outside sessionMon={} geom={} {} {} {}", SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>", geometry.x, geometry.y,
+                LOG(Log::TRACE, "[SSDBG] outputCommit skip window outside sessionMon={} geom={} {} {} {}", SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>", geometry.x, geometry.y,
                      geometry.w, geometry.h);
                 return;
             }
         }
 
-        LOGM(Log::TRACE, "[SSDBG] outputCommit copy frame commitMon={} sessionMon={}", monitor ? monitor->m_name : "<none>", SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>");
+        LOG(Log::TRACE, "[SSDBG] outputCommit copy frame commitMon={} sessionMon={}", monitor ? monitor->m_name : "<none>", SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>");
         frame->copy();
     });
 
@@ -91,7 +91,7 @@ void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
 
 UP<CScreenshareSession> CScreenshareManager::newSession(wl_client* client, PHLMONITOR monitor) {
     if UNLIKELY (!monitor || !State::monitorState()->contains(monitor)) {
-        LOGM(Log::ERR, "Client requested sharing of a monitor that is gone");
+        LOG(Log::ERR, "Client requested sharing of a monitor that is gone");
         return nullptr;
     }
 
@@ -105,7 +105,7 @@ UP<CScreenshareSession> CScreenshareManager::newSession(wl_client* client, PHLMO
 
 UP<CScreenshareSession> CScreenshareManager::newSession(wl_client* client, PHLMONITOR monitor, CBox captureRegion) {
     if UNLIKELY (!monitor || !State::monitorState()->contains(monitor)) {
-        LOGM(Log::ERR, "Client requested sharing of a monitor that is gone");
+        LOG(Log::ERR, "Client requested sharing of a monitor that is gone");
         return nullptr;
     }
 
@@ -118,8 +118,8 @@ UP<CScreenshareSession> CScreenshareManager::newSession(wl_client* client, PHLMO
 }
 
 UP<CScreenshareSession> CScreenshareManager::newSession(wl_client* client, PHLWINDOW window) {
-    if UNLIKELY (!window || !window->m_isMapped) {
-        LOGM(Log::ERR, "Client requested sharing of window that is gone or not shareable!");
+    if UNLIKELY (!window || !window->mapped()) {
+        LOG(Log::ERR, "Client requested sharing of window that is gone or not shareable!");
         return nullptr;
     }
 
@@ -281,6 +281,9 @@ CScreenshareManager::SOutputCopyFBState CScreenshareManager::outputCopyFBState(P
         } else if (frame->m_session->m_type == SHARE_REGION) {
             state.pendingFrames++;
             state.pendingRegionFrames++;
+        } else if (frame->m_session->m_type == SHARE_WINDOW) {
+            state.pendingFrames++;
+            state.pendingWindowFrames++;
         }
     }
 

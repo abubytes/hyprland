@@ -1,7 +1,7 @@
 #include "ImageCaptureSource.hpp"
 #include "core/Output.hpp"
 #include "../output/Monitor.hpp"
-#include "../desktop/view/Window.hpp"
+#include "../desktop/view/window/Window.hpp"
 #include "ForeignToplevel.hpp"
 
 CImageCaptureSource::CImageCaptureSource(SP<CExtImageCaptureSourceV1> resource, PHLMONITOR pMonitor) : m_resource(resource), m_monitor(pMonitor) {
@@ -30,7 +30,7 @@ std::string CImageCaptureSource::getName() {
     if (!m_monitor.expired())
         return m_monitor->m_name;
     if (!m_window.expired())
-        return m_window->m_title;
+        return m_window->metadata().title();
 
     return "error";
 }
@@ -70,14 +70,14 @@ void COutputImageCaptureSourceProtocol::bindManager(wl_client* client, void* dat
     RESOURCE->setCreateSource([](CExtOutputImageCaptureSourceManagerV1* pMgr, uint32_t id, wl_resource* output) {
         const auto OUTPUT = CWLOutputResource::fromResource(output);
         if (!OUTPUT) {
-            LOGM(Log::ERR, "Client tried to create source from invalid output resource");
+            LOG(Log::ERR, "Client tried to create source from invalid output resource");
             pMgr->error(-1, "invalid output resource");
             return;
         }
 
         PHLMONITOR pMonitor = OUTPUT->m_monitor.lock();
         if (!pMonitor) {
-            LOGM(Log::ERR, "Client tried to create source from invalid output resource");
+            LOG(Log::ERR, "Client tried to create source from invalid output resource");
             pMgr->error(-1, "invalid output resource");
             return;
         }
@@ -86,7 +86,7 @@ void COutputImageCaptureSourceProtocol::bindManager(wl_client* client, void* dat
             PROTO::imageCaptureSource->m_sources.emplace_back(makeShared<CImageCaptureSource>(makeShared<CExtImageCaptureSourceV1>(pMgr->client(), pMgr->version(), id), pMonitor));
         PSOURCE->m_self = PSOURCE;
 
-        LOGM(Log::INFO, "New capture source for monitor: {}", pMonitor->m_name);
+        LOG(Log::INFO, "New capture source for monitor: {}", pMonitor->m_name);
     });
 }
 
@@ -108,7 +108,7 @@ void CToplevelImageCaptureSourceProtocol::bindManager(wl_client* client, void* d
     RESOURCE->setCreateSource([](CExtForeignToplevelImageCaptureSourceManagerV1* pMgr, uint32_t id, wl_resource* handle) {
         PHLWINDOW pWindow = PROTO::foreignToplevel->windowFromHandleResource(handle);
         if (!pWindow) {
-            LOGM(Log::ERR, "Client tried to create source from invalid foreign toplevel handle resource");
+            LOG(Log::ERR, "Client tried to create source from invalid foreign toplevel handle resource");
             pMgr->error(-1, "invalid foreign toplevel resource");
             return;
         }
@@ -117,7 +117,7 @@ void CToplevelImageCaptureSourceProtocol::bindManager(wl_client* client, void* d
             PROTO::imageCaptureSource->m_sources.emplace_back(makeShared<CImageCaptureSource>(makeShared<CExtImageCaptureSourceV1>(pMgr->client(), pMgr->version(), id), pWindow));
         PSOURCE->m_self = PSOURCE;
 
-        LOGM(Log::INFO, "New capture source for foreign toplevel: {}", pWindow->m_title);
+        LOG(Log::INFO, "New capture source for foreign toplevel: {}", pWindow->metadata().title());
     });
 }
 

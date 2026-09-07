@@ -7,6 +7,7 @@
 #include "../shared.hpp"
 
 #include <chrono>
+#include <format>
 #include <string>
 #include <thread>
 
@@ -921,6 +922,36 @@ TEST_CASE(workspaceRenameChangeID) {
     }
 }
 
+TEST_CASE(workspaceRenameEmitsGlobalEvent) {
+    OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = '5201' })"));
+    SPAWN_KITTY("workspace_rename_event");
+
+    OK(getFromSocket("/eval hl.plugin.test.expect_workspace_rename_event('5201', 'renamed_by_event_test')"));
+    ASSERT_CONTAINS(getFromSocket("/activeworkspace"), "workspace ID 5201 (renamed_by_event_test)");
+
+    Tests::killAllWindows();
+    OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = '1' })"));
+}
+
+TEST_CASE(windowAtExplicitWorkspace) {
+    OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = '5101' })"));
+    SPAWN_KITTY("hit_workspace_tiled");
+    SPAWN_KITTY("hit_workspace_floating");
+    OK(getFromSocket("/dispatch hl.dsp.window.float({ action = 'set', window = 'class:hit_workspace_floating' })"));
+    OK(getFromSocket("/dispatch hl.dsp.window.resize({ x = 300, y = 300, window = 'class:hit_workspace_floating' })"));
+    OK(getFromSocket("/dispatch hl.dsp.window.move({ x = 300, y = 300, window = 'class:hit_workspace_floating' })"));
+
+    OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = '5102' })"));
+    SPAWN_KITTY("hit_workspace_visible");
+
+    OK(getFromSocket("/eval hl.plugin.test.expect_window_at_workspace('5101', 400, 400, 'hit_workspace_floating')"));
+    OK(getFromSocket("/eval hl.plugin.test.expect_window_at_workspace('5101', 400, 400, 'hit_workspace_tiled', 'hit_workspace_floating')"));
+    OK(getFromSocket("/eval hl.plugin.test.expect_window_at_workspace('5102', 400, 400, 'hit_workspace_visible')"));
+
+    Tests::killAllWindows();
+    OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = '1' })"));
+}
+
 TEST_CASE(workspaceChangeIDUpdatesRules) {
     OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = \"200\" })"));
 
@@ -1194,4 +1225,26 @@ TEST_CASE(workspacesDistinctTiledAndFloatGaps) {
     SPAWN_KITTY("workspacesDistinctTiledAndFloatGaps");
     OK(getFromSocket("/dispatch hl.dsp.window.move({ direction = 'l' })"));
     ASSERT(getFromSocket("r/repl hl.get_active_window().at.x == 10"), "true");
+}
+
+SUBTEST(switchWorkspaceAndCheckActiveWindowFocusIsLostAndRestored) {
+    std::string resp1 = getFromSocket("/activewindow");
+    ASSERT_NOT("Invalid", resp1);
+
+    OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = 2 })"));
+    std::string resp2 = getFromSocket("/activewindow");
+    EXPECT("Invalid", resp2);
+    OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = \"previous\" })"));
+    resp2 = getFromSocket("/activewindow");
+    ASSERT(resp1, resp2);
+}
+
+TEST_CASE(workspaceSwitchUnfocusesWindowFromOldWorkspace) {
+    SPAWN_KITTY("a");
+    for (int followMouse = 0; followMouse <= 3; ++followMouse) {
+        OK(getFromSocket(std::format("/eval hl.config({{ input = {{ follow_mouse = {} }} }})", followMouse)));
+        CALL_SUBTEST(switchWorkspaceAndCheckActiveWindowFocusIsLostAndRestored);
+    }
+    // TODO: also test when workspaces 1 and 2 are on different workspaces.
+    //       At the time of writing, it is broken (i.e., the test would fail).
 }

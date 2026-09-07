@@ -25,7 +25,7 @@ static void hcLogger(enum eHyprcursorLogLevel level, char* message) {
     if (level == HC_LOG_TRACE)
         return;
 
-    Log::logger->log(Log::DEBUG, "[hc] {}", message);
+    LOG(Log::DEBUG, "[hc] {}", message);
 }
 
 CCursorBuffer::CCursorBuffer(cairo_surface_t* surf, const Vector2D& size_, const Vector2D& hot_) : m_hotspot(hot_), m_stride(cairo_image_surface_get_stride(surf)) {
@@ -88,25 +88,25 @@ CCursorManager::CCursorManager() {
         if (SIZE) {
             try {
                 m_size = std::stoi(SIZE);
-            } catch (...) { Log::logger->log(Log::WARN, "Invalid HYPRCURSOR_SIZE value \"{}\"", SIZE); }
+            } catch (...) { LOG(Log::WARN, "Invalid HYPRCURSOR_SIZE value \"{}\"", SIZE); }
         }
 
         if (m_size <= 0) {
-            Log::logger->log(Log::WARN, "HYPRCURSOR_SIZE size not set, defaulting to size 24");
+            LOG(Log::WARN, "HYPRCURSOR_SIZE size not set, defaulting to size 24");
             m_size = 24;
         }
     } else {
-        Log::logger->log(Log::ERR, "Hyprcursor failed loading theme \"{}\", falling back to Xcursor.", m_theme);
+        LOG(Log::ERR, "Hyprcursor failed loading theme \"{}\", falling back to Xcursor.", m_theme);
 
         auto const* SIZE = getenv("XCURSOR_SIZE");
         if (SIZE) {
             try {
                 m_size = std::stoi(SIZE);
-            } catch (...) { Log::logger->log(Log::WARN, "Invalid XCURSOR_SIZE value \"{}\"", SIZE); }
+            } catch (...) { LOG(Log::WARN, "Invalid XCURSOR_SIZE value \"{}\"", SIZE); }
         }
 
         if (m_size <= 0) {
-            Log::logger->log(Log::WARN, "XCURSOR_SIZE size not set, defaulting to size 24");
+            LOG(Log::WARN, "XCURSOR_SIZE size not set, defaulting to size 24");
             m_size = 24;
         }
     }
@@ -170,8 +170,9 @@ void CCursorManager::setAnimationTimer(const int& frame, const int& delay) {
 void CCursorManager::setCursorFromName(const std::string& name) {
 
     static auto PUSEHYPRCURSOR = CConfigValue<Config::INTEGER>("cursor:enable_hyprcursor");
+    m_lastCursorName           = name;
 
-    auto        setXCursor = [this](auto const& name) {
+    auto setXCursor = [this](auto const& name) {
         float scale = std::ceil(m_cursorScale);
 
         auto  xcursor = m_xcursor->getShape(name, m_size, m_cursorScale);
@@ -212,7 +213,7 @@ void CCursorManager::setCursorFromName(const std::string& name) {
             }
 
             if (m_currentCursorShapeData.images.empty()) {
-                Log::logger->log(Log::ERR, "BUG THIS: No fallback found for a cursor in setCursorFromName");
+                LOG(Log::ERR, "BUG THIS: No fallback found for a cursor in setCursorFromName");
                 return false;
             }
         }
@@ -320,6 +321,8 @@ void CCursorManager::updateTheme() {
         m->m_forceFullFrames = 5;
         m->scheduleFrame(Aquamarine::IOutput::AQ_SCHEDULE_CURSOR_SHAPE);
     }
+    if (m_ourBufferConnected)
+        setCursorFromName(m_lastCursorName);
 }
 
 bool CCursorManager::changeTheme(const std::string& name, const int size) {
@@ -337,7 +340,7 @@ bool CCursorManager::changeTheme(const std::string& name, const int size) {
 
         m_hyprcursor = makeUnique<Hyprcursor::CHyprcursorManager>(m_theme.empty() ? nullptr : m_theme.c_str(), options);
         if (!m_hyprcursor->valid()) {
-            Log::logger->log(Log::ERR, "Hyprcursor failed loading theme \"{}\", falling back to XCursor.", m_theme);
+            LOG(Log::ERR, "Hyprcursor failed loading theme \"{}\", falling back to XCursor.", m_theme);
             m_xcursor->loadTheme(m_theme.empty() ? xcursor_theme : m_theme, m_size, m_cursorScale);
         }
     } else

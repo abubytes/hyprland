@@ -1,5 +1,6 @@
 #include "LuaMonitor.hpp"
 #include "LuaWorkspace.hpp"
+#include "../../../helpers/string/StringUtils.hpp"
 #include "../../../state/WorkspaceState.hpp"
 #include "LuaObjectHelpers.hpp"
 
@@ -87,7 +88,7 @@ static int monitorIndex(lua_State* L) {
     auto*      ref = sc<PHLMONITORREF*>(luaL_checkudata(L, 1, MT));
     const auto mon = ref->lock();
     if (!mon) {
-        Log::logger->log(Log::DEBUG, "[lua] Tried to access an expired object");
+        LOG(Log::DEBUG, "[lua] Tried to access an expired object");
         lua_pushnil(L);
         return 1;
     }
@@ -138,12 +139,22 @@ static int monitorIndex(lua_State* L) {
         lua_setfield(L, -2, "width");
         lua_pushinteger(L, sc<int>(mon->m_pixelSize.y));
         lua_setfield(L, -2, "height");
+    } else if (key == "mode") {
+        lua_newtable(L);
+        lua_pushinteger(L, sc<int>(mon->m_size.x));
+        lua_setfield(L, -2, "width");
+        lua_pushinteger(L, sc<int>(mon->m_size.y));
+        lua_setfield(L, -2, "height");
+        lua_pushnumber(L, sc<float>(mon->m_refreshRate));
+        lua_setfield(L, -2, "refresh_rate");
     } else if (key == "scale")
         lua_pushnumber(L, mon->m_scale);
     else if (key == "transform")
         lua_pushinteger(L, sc<int>(mon->m_transform));
     else if (key == "dpms_status")
         lua_pushboolean(L, mon->m_dpmsStatus);
+    else if (key == "enabled")
+        lua_pushboolean(L, mon->enabled());
     else if (key == "vrr_active")
         lua_pushboolean(L, mon->m_vrrActive);
     else if (key == "is_mirror")
@@ -193,6 +204,18 @@ static int monitorIndex(lua_State* L) {
         lua_setfield(L, -2, "bottom");
         lua_pushnumber(L, mon->m_reservedArea.left());
         lua_setfield(L, -2, "left");
+    } else if (key == "hardware_details") {
+        lua_newtable(L);
+        lua_pushstring(L, StringUtils::backendStr(mon->m_output->getBackend()->type()).c_str());
+        lua_setfield(L, -2, "backend");
+        lua_pushboolean(L, mon->m_output->parsedEDID.hdrMetadata.has_value());
+        lua_setfield(L, -2, "hdr");
+        lua_pushboolean(L, mon->m_output->parsedEDID.chromaticityCoords.has_value());
+        lua_setfield(L, -2, "chroma");
+        lua_pushboolean(L, mon->m_output->parsedEDID.supportsBT2020);
+        lua_setfield(L, -2, "bt2020");
+        lua_pushboolean(L, mon->m_output->vrrCapable);
+        lua_setfield(L, -2, "vrr_capable");
     }
 
     // Fns

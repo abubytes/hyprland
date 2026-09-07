@@ -9,6 +9,7 @@
 #include <random>
 #include <pango/pangocairo.h>
 #include "OpenGL.hpp"
+#include "../desktop/view/window/WindowPresentation.hpp"
 #include "Renderer.hpp"
 #include "../Compositor.hpp"
 #include "../helpers/MiscFunctions.hpp"
@@ -75,7 +76,7 @@ CBox Render::GL::resolveBlurUV(const CBox& destinationBox, const Vector2D& textu
 static inline void loadGLProc(void* pProc, const char* name) {
     void* proc = rc<void*>(eglGetProcAddress(name));
     if (proc == nullptr) {
-        Log::logger->log(Log::CRIT, "[Tracy GPU Profiling] eglGetProcAddress({}) failed", name);
+        LOG(Log::CRIT, "[Tracy GPU Profiling] eglGetProcAddress({}) failed", name);
         abort();
     }
     *sc<void**>(pProc) = proc;
@@ -114,7 +115,7 @@ static const char* eglErrorToString(EGLint error) {
 }
 
 static void eglLog(EGLenum error, const char* command, EGLint type, EGLLabelKHR thread, EGLLabelKHR obj, const char* msg) {
-    Log::logger->log(eglLogToLevel(type), "[EGL] Command {} errored out with {} (0x{}): {}", command, eglErrorToString(error), error, msg);
+    LOG(eglLogToLevel(type), "[EGL] Command {} errored out with {} (0x{}): {}", command, eglErrorToString(error), error, msg);
 }
 
 static int openRenderNode(int drmFd) {
@@ -124,14 +125,14 @@ static int openRenderNode(int drmFd) {
         // primary node
         renderName = drmGetPrimaryDeviceNameFromFd(drmFd);
         if (!renderName) {
-            Log::logger->log(Log::ERR, "drmGetPrimaryDeviceNameFromFd failed");
+            LOG(Log::ERR, "drmGetPrimaryDeviceNameFromFd failed");
             return -1;
         }
-        Log::logger->log(Log::DEBUG, "DRM dev {} has no render node, falling back to primary", renderName);
+        LOG(Log::DEBUG, "DRM dev {} has no render node, falling back to primary", renderName);
 
         drmVersion* render_version = drmGetVersion(drmFd);
         if (render_version && render_version->name) {
-            Log::logger->log(Log::DEBUG, "DRM dev versionName {}", render_version->name);
+            LOG(Log::DEBUG, "DRM dev versionName {}", render_version->name);
             if (strcmp(render_version->name, "evdi") == 0) {
                 free(renderName); // NOLINT(cppcoreguidelines-no-malloc)
                 renderName = strdup("/dev/dri/card0");
@@ -140,11 +141,11 @@ static int openRenderNode(int drmFd) {
         }
     }
 
-    Log::logger->log(Log::DEBUG, "openRenderNode got drm device {}", renderName);
+    LOG(Log::DEBUG, "openRenderNode got drm device {}", renderName);
 
     int renderFD = open(renderName, O_RDWR | O_CLOEXEC);
     if (renderFD < 0)
-        Log::logger->log(Log::ERR, "openRenderNode failed to open drm device {}", renderName);
+        LOG(Log::ERR, "openRenderNode failed to open drm device {}", renderName);
 
     free(renderName); // NOLINT(cppcoreguidelines-no-malloc)
     return renderFD;
@@ -184,19 +185,19 @@ void CHyprOpenGLImpl::initEGL(bool gbm) {
     m_exts.KHR_context_flush_control          = EGLEXTENSIONS.contains("EGL_KHR_context_flush_control");
 
     if (m_exts.IMG_context_priority) {
-        Log::logger->log(Log::DEBUG, "EGL: IMG_context_priority supported, requesting high");
+        LOG(Log::DEBUG, "EGL: IMG_context_priority supported, requesting high");
         attrs.push_back(EGL_CONTEXT_PRIORITY_LEVEL_IMG);
         attrs.push_back(EGL_CONTEXT_PRIORITY_HIGH_IMG);
     }
 
     if (m_exts.EXT_create_context_robustness) {
-        Log::logger->log(Log::DEBUG, "EGL: EXT_create_context_robustness supported, requesting lose on reset");
+        LOG(Log::DEBUG, "EGL: EXT_create_context_robustness supported, requesting lose on reset");
         attrs.push_back(EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT);
         attrs.push_back(EGL_LOSE_CONTEXT_ON_RESET_EXT);
     }
 
     if (m_exts.KHR_context_flush_control) {
-        Log::logger->log(Log::DEBUG, "EGL: Using KHR_context_flush_control");
+        LOG(Log::DEBUG, "EGL: Using KHR_context_flush_control");
         attrs.push_back(EGL_CONTEXT_RELEASE_BEHAVIOR_KHR);
         attrs.push_back(EGL_CONTEXT_RELEASE_BEHAVIOR_NONE_KHR); // or _FLUSH_KHR
     }
@@ -211,7 +212,7 @@ void CHyprOpenGLImpl::initEGL(bool gbm) {
 
     m_eglContext = eglCreateContext(m_eglDisplay, EGL_NO_CONFIG_KHR, EGL_NO_CONTEXT, attrs.data());
     if (m_eglContext == EGL_NO_CONTEXT) {
-        Log::logger->log(Log::WARN, "EGL: Failed to create a context with GLES3.2, retrying 3.0");
+        LOG(Log::WARN, "EGL: Failed to create a context with GLES3.2, retrying 3.0");
 
         attrs = attrsNoVer;
         attrs.push_back(EGL_CONTEXT_MAJOR_VERSION);
@@ -231,9 +232,9 @@ void CHyprOpenGLImpl::initEGL(bool gbm) {
         EGLint priority = EGL_CONTEXT_PRIORITY_MEDIUM_IMG;
         eglQueryContext(m_eglDisplay, m_eglContext, EGL_CONTEXT_PRIORITY_LEVEL_IMG, &priority);
         if (priority != EGL_CONTEXT_PRIORITY_HIGH_IMG)
-            Log::logger->log(Log::ERR, "EGL: Failed to obtain a high priority context");
+            LOG(Log::ERR, "EGL: Failed to obtain a high priority context");
         else
-            Log::logger->log(Log::DEBUG, "EGL: Got a high priority context");
+            LOG(Log::DEBUG, "EGL: Got a high priority context");
     }
 
     eglMakeCurrent(m_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, m_eglContext);
@@ -253,12 +254,12 @@ static bool drmDeviceHasName(const drmDevice* device, const std::string& name) {
 EGLDeviceEXT CHyprOpenGLImpl::eglDeviceFromDRMFD(int drmFD) {
     EGLint nDevices = 0;
     if (!m_proc.eglQueryDevicesEXT(0, nullptr, &nDevices)) {
-        Log::logger->log(Log::ERR, "eglDeviceFromDRMFD: eglQueryDevicesEXT failed");
+        LOG(Log::ERR, "eglDeviceFromDRMFD: eglQueryDevicesEXT failed");
         return EGL_NO_DEVICE_EXT;
     }
 
     if (nDevices <= 0) {
-        Log::logger->log(Log::ERR, "eglDeviceFromDRMFD: no devices");
+        LOG(Log::ERR, "eglDeviceFromDRMFD: no devices");
         return EGL_NO_DEVICE_EXT;
     }
 
@@ -266,13 +267,13 @@ EGLDeviceEXT CHyprOpenGLImpl::eglDeviceFromDRMFD(int drmFD) {
     devices.resize(nDevices);
 
     if (!m_proc.eglQueryDevicesEXT(nDevices, devices.data(), &nDevices)) {
-        Log::logger->log(Log::ERR, "eglDeviceFromDRMFD: eglQueryDevicesEXT failed (2)");
+        LOG(Log::ERR, "eglDeviceFromDRMFD: eglQueryDevicesEXT failed (2)");
         return EGL_NO_DEVICE_EXT;
     }
 
     drmDevice* drmDev = nullptr;
     if (int ret = drmGetDevice(drmFD, &drmDev); ret < 0) {
-        Log::logger->log(Log::ERR, "eglDeviceFromDRMFD: drmGetDevice failed");
+        LOG(Log::ERR, "eglDeviceFromDRMFD: drmGetDevice failed");
         return EGL_NO_DEVICE_EXT;
     }
 
@@ -282,21 +283,21 @@ EGLDeviceEXT CHyprOpenGLImpl::eglDeviceFromDRMFD(int drmFD) {
             continue;
 
         if (drmDeviceHasName(drmDev, devName)) {
-            Log::logger->log(Log::DEBUG, "eglDeviceFromDRMFD: Using device {}", devName);
+            LOG(Log::DEBUG, "eglDeviceFromDRMFD: Using device {}", devName);
             drmFreeDevice(&drmDev);
             return d;
         }
     }
 
     drmFreeDevice(&drmDev);
-    Log::logger->log(Log::DEBUG, "eglDeviceFromDRMFD: No drm devices found");
+    LOG(Log::DEBUG, "eglDeviceFromDRMFD: No drm devices found");
     return EGL_NO_DEVICE_EXT;
 }
 
 CHyprOpenGLImpl::CHyprOpenGLImpl() : m_drmFD(g_pCompositor->m_drmRenderNode.fd >= 0 ? g_pCompositor->m_drmRenderNode.fd : g_pCompositor->m_drm.fd) {
     const std::string EGLEXTENSIONS = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
 
-    Log::logger->log(Log::DEBUG, "Supported EGL global extensions: ({}) {}", std::ranges::count(EGLEXTENSIONS, ' '), EGLEXTENSIONS);
+    LOG(Log::DEBUG, "Supported EGL global extensions: ({}) {}", std::ranges::count(EGLEXTENSIONS, ' '), EGLEXTENSIONS);
 
     m_exts.KHR_display_reference = EGLEXTENSIONS.contains("KHR_display_reference");
 
@@ -347,7 +348,7 @@ CHyprOpenGLImpl::CHyprOpenGLImpl() : m_drmFD(g_pCompositor->m_drmRenderNode.fd >
     }
 
     if (!success) {
-        Log::logger->log(Log::WARN, "EGL: EXT_platform_device or EGL_EXT_device_query not supported, using gbm");
+        LOG(Log::WARN, "EGL: EXT_platform_device or EGL_EXT_device_query not supported, using gbm");
         if (EGLEXTENSIONS.contains("KHR_platform_gbm")) {
             success = true;
             m_gbmFD = CFileDescriptor{openRenderNode(m_drmFD)};
@@ -369,11 +370,11 @@ CHyprOpenGLImpl::CHyprOpenGLImpl() : m_drmFD(g_pCompositor->m_drmRenderNode.fd >
 
     m_extensions = EXTENSIONS;
 
-    Log::logger->log(Log::DEBUG, "Creating the Hypr OpenGL Renderer!");
-    Log::logger->log(Log::DEBUG, "Using: {}", rc<const char*>(glGetString(GL_VERSION)));
-    Log::logger->log(Log::DEBUG, "Vendor: {}", rc<const char*>(glGetString(GL_VENDOR)));
-    Log::logger->log(Log::DEBUG, "Renderer: {}", rc<const char*>(glGetString(GL_RENDERER)));
-    Log::logger->log(Log::DEBUG, "Supported extensions: ({}) {}", std::ranges::count(m_extensions, ' '), m_extensions);
+    LOG(Log::DEBUG, "Creating the Hypr OpenGL Renderer!");
+    LOG(Log::DEBUG, "Using: {}", rc<const char*>(glGetString(GL_VERSION)));
+    LOG(Log::DEBUG, "Vendor: {}", rc<const char*>(glGetString(GL_VENDOR)));
+    LOG(Log::DEBUG, "Renderer: {}", rc<const char*>(glGetString(GL_RENDERER)));
+    LOG(Log::DEBUG, "Supported extensions: ({}) {}", std::ranges::count(m_extensions, ' '), m_extensions);
 
     m_exts.EXT_read_format_bgra        = m_extensions.contains("GL_EXT_read_format_bgra");
     m_exts.EXT_color_buffer_half_float = m_extensions.contains("GL_EXT_color_buffer_half_float") || m_extensions.contains("GL_EXT_color_buffer_float");
@@ -381,22 +382,22 @@ CHyprOpenGLImpl::CHyprOpenGLImpl() : m_drmFD(g_pCompositor->m_drmRenderNode.fd >
     RASSERT(m_extensions.contains("GL_EXT_texture_format_BGRA8888"), "GL_EXT_texture_format_BGRA8888 support by the GPU driver is required");
 
     if (!m_exts.EXT_read_format_bgra)
-        Log::logger->log(Log::WARN, "Your GPU does not support GL_EXT_read_format_bgra, this may cause issues with texture importing");
+        LOG(Log::WARN, "Your GPU does not support GL_EXT_read_format_bgra, this may cause issues with texture importing");
     if (!m_exts.EXT_image_dma_buf_import || !m_exts.EXT_image_dma_buf_import_modifiers)
-        Log::logger->log(Log::WARN, "Your GPU does not support DMABUFs, this will possibly cause issues and will take a hit on the performance.");
+        LOG(Log::WARN, "Your GPU does not support DMABUFs, this will possibly cause issues and will take a hit on the performance.");
 
     const std::string EGLEXTENSIONS_DISPLAY = eglQueryString(m_eglDisplay, EGL_EXTENSIONS);
 
-    Log::logger->log(Log::DEBUG, "Supported EGL display extensions: ({}) {}", std::ranges::count(EGLEXTENSIONS_DISPLAY, ' '), EGLEXTENSIONS_DISPLAY);
+    LOG(Log::DEBUG, "Supported EGL display extensions: ({}) {}", std::ranges::count(EGLEXTENSIONS_DISPLAY, ' '), EGLEXTENSIONS_DISPLAY);
 
 #if defined(__linux__)
     m_exts.EGL_ANDROID_native_fence_sync_ext = EGLEXTENSIONS_DISPLAY.contains("EGL_ANDROID_native_fence_sync");
 
     if (!m_exts.EGL_ANDROID_native_fence_sync_ext)
-        Log::logger->log(Log::WARN, "Your GPU does not support explicit sync via the EGL_ANDROID_native_fence_sync extension.");
+        LOG(Log::WARN, "Your GPU does not support explicit sync via the EGL_ANDROID_native_fence_sync extension.");
 #else
     m_exts.EGL_ANDROID_native_fence_sync_ext = false;
-    Log::logger->log(Log::WARN, "Forcefully disabling explicit sync: BSD is missing support for proper timeline export");
+    LOG(Log::WARN, "Forcefully disabling explicit sync: BSD is missing support for proper timeline export");
 #endif
 
 #ifdef USE_TRACY_GPU
@@ -410,8 +411,6 @@ CHyprOpenGLImpl::CHyprOpenGLImpl() : m_drmFD(g_pCompositor->m_drmRenderNode.fd >
     TRACY_GPU_CONTEXT;
 
     initDRMFormats();
-
-    static auto P = Event::bus()->m_events.render.pre.listen([&](PHLMONITOR mon) { preRender(mon); });
 
     RASSERT(eglMakeCurrent(m_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT), "Couldn't unset current EGL!");
 
@@ -442,7 +441,7 @@ CHyprOpenGLImpl::CHyprOpenGLImpl() : m_drmFD(g_pCompositor->m_drmRenderNode.fd >
         if (e.state != WL_POINTER_BUTTON_STATE_PRESSED)
             return;
 
-        addLastPressToHistory(g_pInputManager->getMouseCoordsInternal(), g_pInputManager->getClickMode() == CLICKMODE_KILL, false);
+        addLastPressToHistory(Pointer::mgr()->untransformedPosition(), g_pInputManager->getClickMode() == CLICKMODE_KILL, false);
     });
 
     static auto P3 = Event::bus()->m_events.input.touch.down.listen([](ITouch::SDownEvent e, Event::SCallbackInfo&) {
@@ -479,7 +478,7 @@ std::optional<std::vector<uint64_t>> CHyprOpenGLImpl::getModsForFormat(EGLint fo
 
     EGLint len = 0;
     if (!m_proc.eglQueryDmaBufModifiersEXT(m_eglDisplay, format, 0, nullptr, nullptr, &len)) {
-        Log::logger->log(Log::ERR, "EGL: Failed to query mods");
+        LOG(Log::ERR, "EGL: Failed to query mods");
         return std::nullopt;
     }
 
@@ -494,7 +493,7 @@ std::optional<std::vector<uint64_t>> CHyprOpenGLImpl::getModsForFormat(EGLint fo
 
     if (!m_proc.eglQueryDmaBufModifiersEXT(m_eglDisplay, format, len, mods.data(), external.data(), &len)) {
         const auto err = eglGetError();
-        Log::logger->log(Log::ERR, "EGL: Failed to query mods (2) for format 0x{:x}, eglGetError: 0x{:x}", format, err);
+        LOG(Log::ERR, "EGL: Failed to query mods (2) for format 0x{:x}, eglGetError: 0x{:x}", format, err);
         return std::nullopt;
     }
 
@@ -523,10 +522,10 @@ std::optional<std::vector<uint64_t>> CHyprOpenGLImpl::getModsForFormat(EGLint fo
 void CHyprOpenGLImpl::initDRMFormats() {
     const auto DISABLE_MODS = Env::envEnabled("HYPRLAND_EGL_NO_MODIFIERS");
     if (DISABLE_MODS)
-        Log::logger->log(Log::WARN, "HYPRLAND_EGL_NO_MODIFIERS set, disabling modifiers");
+        LOG(Log::WARN, "HYPRLAND_EGL_NO_MODIFIERS set, disabling modifiers");
 
     if (!m_exts.EXT_image_dma_buf_import) {
-        Log::logger->log(Log::ERR, "EGL: No dmabuf import, DMABufs will not work.");
+        LOG(Log::ERR, "EGL: No dmabuf import, DMABufs will not work.");
         return;
     }
 
@@ -535,28 +534,28 @@ void CHyprOpenGLImpl::initDRMFormats() {
     if (!m_exts.EXT_image_dma_buf_import_modifiers || !m_proc.eglQueryDmaBufFormatsEXT) {
         formats.push_back(DRM_FORMAT_ARGB8888);
         formats.push_back(DRM_FORMAT_XRGB8888);
-        Log::logger->log(Log::WARN, "EGL: No mod support");
+        LOG(Log::WARN, "EGL: No mod support");
     } else {
         EGLint len = 0;
         if (!m_proc.eglQueryDmaBufFormatsEXT(m_eglDisplay, 0, nullptr, &len)) {
             const auto err = eglGetError();
-            Log::logger->log(Log::ERR, "EGL: Failed to query formats, eglGetError: 0x{:x}", err);
+            LOG(Log::ERR, "EGL: Failed to query formats, eglGetError: 0x{:x}", err);
             return;
         }
         formats.resize(len);
         if (!m_proc.eglQueryDmaBufFormatsEXT(m_eglDisplay, len, formats.data(), &len)) {
             const auto err = eglGetError();
-            Log::logger->log(Log::ERR, "EGL: Failed to query formats (2), eglGetError: 0x{:x}", err);
+            LOG(Log::ERR, "EGL: Failed to query formats (2), eglGetError: 0x{:x}", err);
             return;
         }
     }
 
     if (formats.empty()) {
-        Log::logger->log(Log::ERR, "EGL: Failed to get formats, DMABufs will not work.");
+        LOG(Log::ERR, "EGL: Failed to get formats, DMABufs will not work.");
         return;
     }
 
-    Log::logger->log(Log::DEBUG, "Supported DMA-BUF formats:");
+    LOG(Log::DEBUG, "Supported DMA-BUF formats:");
 
     std::vector<SDRMFormat> dmaFormats;
     // reserve number of elements to avoid reallocations
@@ -588,7 +587,7 @@ void CHyprOpenGLImpl::initDRMFormats() {
         modifierData.reserve(mods.size());
 
         auto fmtName = drmGetFormatName(fmt);
-        Log::logger->log(Log::DEBUG, "EGL: GPU Supports Format {} (0x{:x})", fmtName ? fmtName : "?unknown?", fmt);
+        LOG(Log::DEBUG, "EGL: GPU Supports Format {} (0x{:x})", fmtName ? fmtName : "?unknown?", fmt);
         for (auto const& mod : mods) {
             auto modName = drmGetFormatModifierName(mod);
             modifierData.emplace_back(mod, modName ? modName : "?unknown?");
@@ -606,16 +605,15 @@ void CHyprOpenGLImpl::initDRMFormats() {
         });
 
         for (auto const& [m, name] : modifierData) {
-            Log::logger->log(Log::DEBUG, "EGL: | with modifier {} (0x{:x})", name, m);
+            LOG(Log::DEBUG, "EGL: | with modifier {} (0x{:x})", name, m);
             mods.emplace_back(m);
         }
     }
 
-    Log::logger->log(Log::DEBUG, "EGL: {} formats found in total. Some modifiers may be omitted as they are external-only.", dmaFormats.size());
+    LOG(Log::DEBUG, "EGL: {} formats found in total. Some modifiers may be omitted as they are external-only.", dmaFormats.size());
 
     if (dmaFormats.empty())
-        Log::logger->log(
-            Log::WARN, "EGL: WARNING: No dmabuf formats were found, dmabuf will be disabled. This will degrade performance, but is most likely a driver issue or a very old GPU.");
+        LOG(Log::WARN, "EGL: WARNING: No dmabuf formats were found, dmabuf will be disabled. This will degrade performance, but is most likely a driver issue or a very old GPU.");
 
     m_drmFormats = dmaFormats;
 
@@ -623,7 +621,7 @@ void CHyprOpenGLImpl::initDRMFormats() {
     m_fp16Supported = m_exts.EXT_color_buffer_half_float && std::ranges::any_of(m_drmFormats, [](const auto& fmt) { return fmt.drmFormat == DRM_FORMAT_ABGR16161616F; });
 
     if (!m_fp16Supported)
-        Log::logger->log(Log::WARN, "Your GPU does not support rendering to FP16 buffers, some effects and CM settings might be unavailable.");
+        LOG(Log::WARN, "Your GPU does not support rendering to FP16 buffers, some effects and CM settings might be unavailable.");
 }
 
 EGLImageKHR CHyprOpenGLImpl::createEGLImage(const Aquamarine::SDMABUFAttrs& attrs) {
@@ -673,7 +671,7 @@ EGLImageKHR CHyprOpenGLImpl::createEGLImage(const Aquamarine::SDMABUFAttrs& attr
 
     EGLImageKHR image = m_proc.eglCreateImageKHR(m_eglDisplay, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, attribs.data());
     if (image == EGL_NO_IMAGE_KHR) {
-        Log::logger->log(Log::ERR, "EGL: EGLCreateImageKHR failed: {}", eglGetError());
+        LOG(Log::ERR, "EGL: EGLCreateImageKHR failed: {}", eglGetError());
         return EGL_NO_IMAGE_KHR;
     }
 
@@ -857,7 +855,7 @@ void CHyprOpenGLImpl::end() {
                         finalBox        = CBox{{}, m_renderData.pMonitor->m_transformedSize};
                         finalCMComplete = true;
                     } else {
-                        Log::logger->log(Log::ERR, "Failed to acquire a work buffer for final color management");
+                        LOG(Log::ERR, "Failed to acquire a work buffer for final color management");
                         postProcessFBs[postProcessCount].reset();
                     }
                 }
@@ -881,7 +879,7 @@ void CHyprOpenGLImpl::end() {
                         finalTexture = postProcessFBs[postProcessCount++]->getTexture();
                         finalBox     = CBox{{}, m_renderData.pMonitor->m_transformedSize};
                     } else {
-                        Log::logger->log(Log::ERR, "Failed to acquire a work buffer for the final screen shader");
+                        LOG(Log::ERR, "Failed to acquire a work buffer for the final screen shader");
                         postProcessFBs[postProcessCount].reset();
                     }
                 }
@@ -939,14 +937,44 @@ void CHyprOpenGLImpl::end() {
 }
 
 static const std::vector<std::string> SHADER_INCLUDES = {
-    "defines.h",   "constants.h",     "cm_helpers.glsl",  "rounding.glsl", "CM.glsl",    "tonemap.glsl",    "gain.glsl",        "border.glsl",
-    "shadow.glsl", "inner_glow.glsl", "blurprepare.glsl", "blur1.glsl",    "blur2.glsl", "blurFinish.glsl", "motion_blur.glsl", "gradient.glsl",
+    "defines.h",       "constants.h",      "cm_helpers.glsl", "rounding.glsl", "CM.glsl",         "tonemap.glsl",     "gain.glsl",     "border.glsl",      "shadow.glsl",
+    "inner_glow.glsl", "blurprepare.glsl", "blur1.glsl",      "blur2.glsl",    "blurFinish.glsl", "motion_blur.glsl", "gradient.glsl", "glassFinish.glsl", "fluidJar.glsl",
 };
 
 // order matters, see ePreparedFragmentShader
 const std::array<std::string, SH_FRAG_LAST> FRAG_SHADERS = {
-    "quad.frag",       "passthru.frag", "rgbamatte.frag",  "ext.frag",     "blur1.frag",  "blur2.frag",  "blurprepare.frag",
-    "blurfinish.frag", "shadow.frag",   "inner_glow.frag", "surface.frag", "border.frag", "glitch.frag",
+    "quad.frag",
+    "passthru.frag",
+    "rgbamatte.frag",
+    "ext.frag",
+    "blur1.frag",
+    "blur2.frag",
+    "blurprepare.frag",
+    "blurfinish.frag",
+    "shadow.frag",
+    "inner_glow.frag",
+    "surface.frag",
+    "border.frag",
+    "glitch.frag",
+    "frostfinish.frag",
+    "ripplefinish.frag",
+    "dropsfinish.frag",
+    "waterstep.frag",
+    "waterfinish.frag",
+    "fluidjarinit.frag",
+    "fluidjarstep.frag",
+    "fluidjargraph.frag",
+    "fluidjartrack.frag",
+    "fluidjarvisual.frag",
+    "fluidjarresample.frag",
+    "fluidjarhistoryresample.frag",
+    "fluidjartrackingresample.frag",
+    "fluidjarfinish.frag",
+    "prismfinish.frag",
+    "heatshimmerfinish.frag",
+    "acrylicfinish.frag",
+    "aurorafinish.frag",
+    "hazefinish.frag",
 };
 
 bool CHyprOpenGLImpl::initShaders(const std::string& path) {
@@ -967,14 +995,14 @@ bool CHyprOpenGLImpl::initShaders(const std::string& path) {
         if (!m_shadersInitialized)
             throw e;
 
-        Log::logger->log(Log::ERR, "Shaders update failed: {}", e.what());
+        LOG(Log::ERR, "Shaders update failed: {}", e.what());
         return false;
     }
 
     m_shaders            = shaders;
     m_shadersInitialized = true;
 
-    Log::logger->log(Log::DEBUG, "Shaders initialized successfully.");
+    LOG(Log::DEBUG, "Shaders initialized successfully.");
     return true;
 }
 
@@ -1059,6 +1087,10 @@ void CHyprOpenGLImpl::blend(bool enabled) {
     m_blend = enabled;
 }
 
+bool CHyprOpenGLImpl::blendEnabled() const {
+    return m_blend;
+}
+
 void CHyprOpenGLImpl::scissor(const CBox& originalBox, bool transform) {
     auto& m_renderData = g_pHyprRenderer->m_renderData;
     RASSERT(m_renderData.pMonitor, "Tried to scissor without begin()!");
@@ -1123,13 +1155,39 @@ void CHyprOpenGLImpl::renderRectWithBlurInternal(const CBox& box, const CHyprCol
     CRegion damage{g_pHyprRenderer->m_renderData.damage};
     damage.intersect(box);
 
-    auto       blurredBG = data.xray ? g_pHyprRenderer->m_renderData.pMonitor->resources()->m_blurFB->getTexture() : g_pHyprRenderer->blurMainFramebuffer(data.blurA, &damage);
+    auto patternBox = data.blurPatternBox.value_or(box);
+    g_pHyprRenderer->m_renderData.renderModif.applyToBox(patternBox);
+    auto shapeBox = box;
+    g_pHyprRenderer->m_renderData.renderModif.applyToBox(shapeBox);
+    std::optional<SBlurShape> shape;
+    if (std::abs(shapeBox.rot) < 0.0001F)
+        shape = SBlurShape{
+            .box           = shapeBox,
+            .radius        = std::max(sc<float>(data.round), 0.F),
+            .roundingPower = data.roundingPower,
+        };
+    const bool usePrecomputedBlur = data.xray && !g_pHyprRenderer->blurProviderRequiresLiveBlur();
+    const auto blurredFB = usePrecomputedBlur ? g_pHyprRenderer->m_renderData.pMonitor->resources()->m_blurFB :
+                                                g_pHyprRenderer->blurMainFramebuffer(data.blurA, damage, {.patternBox = patternBox, .owner = data.blurOwner, .shape = shape});
+    const auto blurredBG = blurredFB->getTexture();
 
-    CBox       MONITORBOX                     = {0, 0, g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.x, g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.y};
     const auto SAVEDRENDERMODIF               = g_pHyprRenderer->m_renderData.renderModif;
     g_pHyprRenderer->m_renderData.renderModif = {}; // fix shit
-    renderTexture(blurredBG, MONITORBOX,
-                  STextureRenderData{.damage = &damage, .a = data.blurA, .round = data.round, .roundingPower = 2.F, .allowCustomUV = false, .allowDim = false, .noAA = false});
+
+    const auto blurUV = resolveBlurUV(box, blurredBG->m_size);
+
+    renderTexture(blurredBG, box,
+                  STextureRenderData{
+                      .damage                      = &damage,
+                      .a                           = data.blurA,
+                      .round                       = data.round,
+                      .roundingPower               = data.roundingPower,
+                      .allowCustomUV               = true,
+                      .allowDim                    = false,
+                      .noAA                        = false,
+                      .primarySurfaceUVTopLeft     = blurUV.pos(),
+                      .primarySurfaceUVBottomRight = blurUV.pos() + blurUV.size(),
+                  });
     g_pHyprRenderer->m_renderData.renderModif = SAVEDRENDERMODIF;
 
     renderRectWithDamageInternal(box, col, data);
@@ -1299,7 +1357,7 @@ WP<CShader> CHyprOpenGLImpl::renderScreenShaderInternal() {
 
     if (*PDT == 0) {
         PHLMONITORREF pMonitor = m_renderData.pMonitor;
-        Vector2D      p        = ((g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position) * pMonitor->m_scale);
+        Vector2D      p        = ((Pointer::mgr()->untransformedPosition() - pMonitor->m_position) * pMonitor->m_scale);
         shader->setUniformFloat2(SHADER_POINTER, p.x / pMonitor->m_transformedSize.x, p.y / pMonitor->m_transformedSize.y);
 
         std::vector<float> pressedPos = m_pressedHistoryPositions | std::views::transform([&](const Vector2D& vec) {
@@ -1428,10 +1486,10 @@ WP<CShader> CHyprOpenGLImpl::renderToFBInternal(SP<ITexture> tex, const STexture
         ;
 
     if (g_pHyprRenderer->m_renderData.pMonitor->needsACopyFB())
-        Log::logger->log(Log::TRACE, "CM: render to FB skip={} {} -> {}", skipCM, SOURCE_IMAGE_DESCRIPTION->value(), TARGET_IMAGE_DESCRIPTION->value());
+        LOG(Log::TRACE, "CM: render to FB skip={} {} -> {}", skipCM, SOURCE_IMAGE_DESCRIPTION->value(), TARGET_IMAGE_DESCRIPTION->value());
 
     if (data.allowDim && g_pHyprRenderer->m_renderData.currentWindow &&
-        (g_pHyprRenderer->m_renderData.currentWindow->m_notRespondingTint->value() > 0 || g_pHyprRenderer->m_renderData.currentWindow->m_dimPercent->value() > 0))
+        (g_pHyprRenderer->m_renderData.currentWindow->presentation().notRespondingTint() > 0 || g_pHyprRenderer->m_renderData.currentWindow->presentation().dimPercent() > 0))
         shaderFeatures |= SH_FEAT_TINT;
 
     if (data.round > 0)
@@ -1523,13 +1581,13 @@ WP<CShader> CHyprOpenGLImpl::renderToFBInternal(SP<ITexture> tex, const STexture
     }
 
     if (data.allowDim && g_pHyprRenderer->m_renderData.currentWindow) {
-        if (g_pHyprRenderer->m_renderData.currentWindow->m_notRespondingTint->value() > 0) {
-            const auto DIM = g_pHyprRenderer->m_renderData.currentWindow->m_notRespondingTint->value();
+        if (g_pHyprRenderer->m_renderData.currentWindow->presentation().notRespondingTint() > 0) {
+            const auto DIM = g_pHyprRenderer->m_renderData.currentWindow->presentation().notRespondingTint();
             shader->setUniformInt(SHADER_APPLY_TINT, 1);
             shader->setUniformFloat3(SHADER_TINT, 1.f - DIM, 1.f - DIM, 1.f - DIM);
-        } else if (g_pHyprRenderer->m_renderData.currentWindow->m_dimPercent->value() > 0) {
+        } else if (g_pHyprRenderer->m_renderData.currentWindow->presentation().dimPercent() > 0) {
             shader->setUniformInt(SHADER_APPLY_TINT, 1);
-            const auto DIM = g_pHyprRenderer->m_renderData.currentWindow->m_dimPercent->value();
+            const auto DIM = g_pHyprRenderer->m_renderData.currentWindow->presentation().dimPercent();
             shader->setUniformFloat3(SHADER_TINT, 1.f - DIM, 1.f - DIM, 1.f - DIM);
         } else
             shader->setUniformInt(SHADER_APPLY_TINT, 0);
@@ -1628,6 +1686,8 @@ void CHyprOpenGLImpl::renderTextureInternal(SP<ITexture> tex, const CBox& box, c
             else
                 damageClip.intersect(data.clipRegion);
         }
+
+        damageClip.intersect(*data.damage);
 
         if (!damageClip.empty()) {
             damageClip.forEachRect([this](const auto& RECT) {
@@ -1793,324 +1853,6 @@ void CHyprOpenGLImpl::renderTextureMatte(SP<ITexture> tex, const CBox& box, SP<I
     tex->unbind();
 }
 
-static SCMSettings blurIntermediateCMSettings(bool toIntermediate) {
-    const auto WORKBUFFER   = g_pHyprRenderer->workBufferImageDescription();
-    const auto INTERMEDIATE = getDefaultImageDescription();
-
-    auto       settings = toIntermediate ? g_pHyprRenderer->getCMSettings(WORKBUFFER, INTERMEDIATE) : g_pHyprRenderer->getCMSettings(INTERMEDIATE, WORKBUFFER);
-    auto&      range    = toIntermediate ? settings.dstTFRange : settings.srcTFRange;
-    range.max           = std::max(range.max, sc<float>(WORKBUFFER->value().luminances.max));
-    return settings;
-}
-
-// This probably isn't the fastest
-// but it works... well, I guess?
-//
-// Dual (or more) kawase blur
-SP<IFramebuffer> CHyprOpenGLImpl::blurFramebufferWithDamage(float a, CRegion* originalDamage, CGLFramebuffer& source) {
-    TRACY_GPU_ZONE("RenderBlurFramebufferWithDamage");
-    auto&      m_renderData = g_pHyprRenderer->m_renderData;
-
-    const auto BLENDBEFORE = m_blend;
-    blend(false);
-    setCapStatus(GL_STENCIL_TEST, false);
-
-    CBox        MONITORBOX = {0, 0, m_renderData.pMonitor->m_transformedSize.x, m_renderData.pMonitor->m_transformedSize.y};
-
-    const auto& glMatrix = g_pHyprRenderer->projectBoxToTarget(MONITORBOX);
-
-    // get the config settings
-    static auto PBLURSIZE             = CConfigValue<Config::INTEGER>("decoration:blur:size");
-    static auto PBLURPASSES           = CConfigValue<Config::INTEGER>("decoration:blur:passes");
-    static auto PBLURVIBRANCY         = CConfigValue<Config::FLOAT>("decoration:blur:vibrancy");
-    static auto PBLURVIBRANCYDARKNESS = CConfigValue<Config::FLOAT>("decoration:blur:vibrancy_darkness");
-
-    const auto  BLUR_PASSES = std::clamp(*PBLURPASSES, sc<int64_t>(1), sc<int64_t>(8));
-
-    // prep damage
-    CRegion damage{*originalDamage};
-    damage.expand(std::clamp(*PBLURSIZE, sc<int64_t>(1), sc<int64_t>(40)) * pow(2, BLUR_PASSES));
-
-    // helper
-    const auto PMIRRORFB     = g_pHyprRenderer->m_renderData.pMonitor->resources()->getUnusedWorkBuffer();
-    const auto PMIRRORSWAPFB = g_pHyprRenderer->m_renderData.pMonitor->resources()->getUnusedWorkBuffer();
-
-    auto       currentRenderToFB = PMIRRORFB;
-
-    // Begin with base color adjustments - global brightness and contrast
-    // TODO: make this a part of the first pass maybe to save on a drawcall?
-    {
-        static auto PBLURCONTRAST   = CConfigValue<Config::FLOAT>("decoration:blur:contrast");
-        static auto PBLURBRIGHTNESS = CConfigValue<Config::FLOAT>("decoration:blur:brightness");
-        PMIRRORSWAPFB->bind();
-        GLFB(PMIRRORSWAPFB)->clearAfterInvalidation();
-
-        setActiveTexture(GL_TEXTURE0);
-
-        auto currentTex = source.getTexture();
-
-        currentTex->bind();
-        currentTex->setTexParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-
-        WP<CShader> shader;
-
-        // From FB to sRGB
-        const bool skipCM = !m_cmSupported || !g_pHyprRenderer->workBufferImageDescription()->needsCM(getDefaultImageDescription());
-        if (!skipCM) {
-            const auto settings = blurIntermediateCMSettings(/* toIntermediate */ true);
-            shader              = useShader(getShaderVariant(SH_FRAG_BLURPREPARE, SH_FEAT_CM, settings.sourceTF, settings.targetTF));
-
-            passCMUniforms(shader, g_pHyprRenderer->workBufferImageDescription(), getDefaultImageDescription(), false, -1.F, -1, settings);
-            shader->setUniformFloat(SHADER_SDR_SATURATION,
-                                    m_renderData.pMonitor->m_sdrSaturation > 0 &&
-                                            g_pHyprRenderer->workBufferImageDescription()->value().transferFunction == NColorManagement::CM_TRANSFER_FUNCTION_ST2084_PQ ?
-                                        m_renderData.pMonitor->m_sdrSaturation :
-                                        1.0f);
-            shader->setUniformFloat(SHADER_SDR_BRIGHTNESS,
-                                    m_renderData.pMonitor->m_sdrBrightness > 0 &&
-                                            g_pHyprRenderer->workBufferImageDescription()->value().transferFunction == NColorManagement::CM_TRANSFER_FUNCTION_ST2084_PQ ?
-                                        m_renderData.pMonitor->m_sdrBrightness :
-                                        1.0f);
-        } else
-            shader = useShader(getShaderVariant(SH_FRAG_BLURPREPARE));
-
-        shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_TRUE, glMatrix.getMatrix());
-        shader->setUniformFloat(SHADER_CONTRAST, *PBLURCONTRAST);
-        shader->setUniformFloat(SHADER_BRIGHTNESS, *PBLURBRIGHTNESS);
-        shader->setUniformInt(SHADER_TEX, 0);
-
-        glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
-
-        if (!damage.empty()) {
-            damage.forEachRect([this](const auto& RECT) {
-                scissor(&RECT, false);
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-            });
-        }
-
-        glBindVertexArray(0);
-        currentRenderToFB = PMIRRORSWAPFB;
-    }
-
-    // declare the draw func
-    auto drawPass = [&](WP<CShader> shader, ePreparedFragmentShader frag, CRegion* pDamage) {
-        if (currentRenderToFB == PMIRRORFB)
-            PMIRRORSWAPFB->bind();
-        else
-            PMIRRORFB->bind();
-
-        setActiveTexture(GL_TEXTURE0);
-
-        auto currentTex = currentRenderToFB->getTexture();
-
-        currentTex->bind();
-
-        currentTex->setTexParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-
-        // prep two shaders
-        shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_TRUE, glMatrix.getMatrix());
-        shader->setUniformFloat(SHADER_RADIUS, *PBLURSIZE * a); // this makes the blursize change with a
-        if (frag == SH_FRAG_BLUR1) {
-            shader->setUniformFloat2(SHADER_HALFPIXEL, 0.5f / (m_renderData.pMonitor->m_transformedSize.x / 2.f), 0.5f / (m_renderData.pMonitor->m_transformedSize.y / 2.f));
-            shader->setUniformInt(SHADER_PASSES, BLUR_PASSES);
-            shader->setUniformFloat(SHADER_VIBRANCY, *PBLURVIBRANCY);
-            shader->setUniformFloat(SHADER_VIBRANCY_DARKNESS, *PBLURVIBRANCYDARKNESS);
-        } else
-            shader->setUniformFloat2(SHADER_HALFPIXEL, 0.5f / (m_renderData.pMonitor->m_transformedSize.x * 2.f), 0.5f / (m_renderData.pMonitor->m_transformedSize.y * 2.f));
-        shader->setUniformInt(SHADER_TEX, 0);
-
-        glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
-
-        if (!pDamage->empty()) {
-            pDamage->forEachRect([this](const auto& RECT) {
-                scissor(&RECT, false);
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-            });
-        }
-
-        glBindVertexArray(0);
-
-        if (currentRenderToFB != PMIRRORFB)
-            currentRenderToFB = PMIRRORFB;
-        else
-            currentRenderToFB = PMIRRORSWAPFB;
-    };
-
-    // draw the things.
-    // first draw is swap -> mirr
-    PMIRRORFB->bind();
-    GLFB(PMIRRORFB)->clearAfterInvalidation();
-    PMIRRORSWAPFB->getTexture()->bind();
-
-    // damage region will be scaled, make a temp
-    CRegion tempDamage{damage};
-
-    // and draw
-    auto shader = useShader(getShaderVariant(SH_FRAG_BLUR1));
-    for (auto i = 1; i <= BLUR_PASSES; ++i) {
-        tempDamage = damage.copy().scale(1.f / (1 << i));
-        drawPass(shader, SH_FRAG_BLUR1, &tempDamage); // down
-    }
-
-    shader = useShader(getShaderVariant(SH_FRAG_BLUR2));
-    for (auto i = BLUR_PASSES - 1; i >= 0; --i) {
-        tempDamage = damage.copy().scale(1.f / (1 << i)); // when upsampling we make the region twice as big
-        drawPass(shader, SH_FRAG_BLUR2, &tempDamage);     // up
-    }
-
-    // finalize the image
-    {
-        static auto PBLURNOISE      = CConfigValue<Config::FLOAT>("decoration:blur:noise");
-        static auto PBLURBRIGHTNESS = CConfigValue<Config::FLOAT>("decoration:blur:brightness");
-
-        if (currentRenderToFB == PMIRRORFB)
-            PMIRRORSWAPFB->bind();
-        else
-            PMIRRORFB->bind();
-
-        setActiveTexture(GL_TEXTURE0);
-
-        auto currentTex = currentRenderToFB->getTexture();
-
-        currentTex->bind();
-
-        currentTex->setTexParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-
-        // From FB to sRGB
-        const bool skipCM = !m_cmSupported || !g_pHyprRenderer->workBufferImageDescription()->needsCM(getDefaultImageDescription());
-        if (!skipCM) {
-            const auto settings = blurIntermediateCMSettings(/* toIntermediate */ false);
-            shader              = useShader(getShaderVariant(SH_FRAG_BLURFINISH, SH_FEAT_CM, settings.sourceTF, settings.targetTF));
-
-            passCMUniforms(shader, getDefaultImageDescription(), g_pHyprRenderer->workBufferImageDescription(), false, -1.F, -1, settings);
-            shader->setUniformFloat(SHADER_SDR_SATURATION,
-                                    m_renderData.pMonitor->m_sdrSaturation > 0 &&
-                                            g_pHyprRenderer->workBufferImageDescription()->value().transferFunction == NColorManagement::CM_TRANSFER_FUNCTION_ST2084_PQ ?
-                                        m_renderData.pMonitor->m_sdrSaturation :
-                                        1.0f);
-            shader->setUniformFloat(SHADER_SDR_BRIGHTNESS,
-                                    m_renderData.pMonitor->m_sdrBrightness > 0 &&
-                                            g_pHyprRenderer->workBufferImageDescription()->value().transferFunction == NColorManagement::CM_TRANSFER_FUNCTION_ST2084_PQ ?
-                                        m_renderData.pMonitor->m_sdrBrightness :
-                                        1.0f);
-        } else
-            shader = useShader(getShaderVariant(SH_FRAG_BLURFINISH));
-
-        shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_TRUE, glMatrix.getMatrix());
-        shader->setUniformFloat(SHADER_NOISE, *PBLURNOISE);
-        shader->setUniformFloat(SHADER_BRIGHTNESS, *PBLURBRIGHTNESS);
-
-        shader->setUniformInt(SHADER_TEX, 0);
-
-        glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
-
-        if (!damage.empty()) {
-            damage.forEachRect([this](const auto& RECT) {
-                scissor(&RECT, false /* this region is already transformed */);
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-            });
-        }
-
-        glBindVertexArray(0);
-
-        if (currentRenderToFB != PMIRRORFB)
-            currentRenderToFB = PMIRRORFB;
-        else
-            currentRenderToFB = PMIRRORSWAPFB;
-    }
-
-    // finish
-    PMIRRORFB->getTexture()->unbind();
-
-    blend(BLENDBEFORE);
-
-    return currentRenderToFB;
-}
-
-void CHyprOpenGLImpl::preRender(PHLMONITOR pMonitor) {
-    static auto PBLURNEWOPTIMIZE = CConfigValue<Config::INTEGER>("decoration:blur:new_optimizations");
-    static auto PBLURXRAY        = CConfigValue<Config::INTEGER>("decoration:blur:xray");
-    static auto PBLUR            = CConfigValue<Config::INTEGER>("decoration:blur:enabled");
-
-    if (!*PBLURNEWOPTIMIZE || !pMonitor->m_blurFBDirty || !*PBLUR)
-        return;
-
-    // ignore if solitary present, nothing to blur
-    if (!pMonitor->m_solitaryClient.expired())
-        return;
-
-    // check if we need to update the blur fb
-    // if there are no windows that would benefit from it,
-    // we will ignore that the blur FB is dirty.
-
-    auto windowShouldBeBlurred = [&](PHLWINDOW pWindow) -> bool {
-        if (!pWindow)
-            return false;
-
-        if (pWindow->m_ruleApplicator->noBlur().valueOrDefault())
-            return false;
-
-        if (pWindow->wlSurface()->small() && !pWindow->wlSurface()->m_fillIgnoreSmall)
-            return true;
-
-        const auto  PSURFACE = pWindow->wlSurface()->resource();
-
-        const auto  PWORKSPACE = pWindow->m_workspace;
-        const float A          = pWindow->alphaValue(WINDOW_ALPHA_FADE) * pWindow->alphaValue(WINDOW_ALPHA_FULLSCREEN) * pWindow->alphaValue(WINDOW_ALPHA_LAYOUT) *
-            pWindow->alphaValue(WINDOW_ALPHA_ACTIVE) * PWORKSPACE->m_alpha->value();
-
-        if (A >= 1.f) {
-            // if (PSURFACE->opaque)
-            //   return false;
-
-            CRegion        inverseOpaque;
-
-            pixman_box32_t surfbox = {0, 0, PSURFACE->m_current.size.x, PSURFACE->m_current.size.y};
-            CRegion        opaqueRegion{PSURFACE->m_current.opaque};
-            inverseOpaque.set(opaqueRegion).invert(&surfbox).intersect(0, 0, PSURFACE->m_current.size.x, PSURFACE->m_current.size.y);
-
-            if (inverseOpaque.empty())
-                return false;
-        }
-
-        return true;
-    };
-
-    bool hasWindows = false;
-    for (auto const& w : Desktop::windowState()->windows()) {
-        if (w->m_workspace == pMonitor->m_activeWorkspace && w->visible() && w->m_isMapped && (!w->m_isFloating || *PBLURXRAY)) {
-
-            // check if window is valid
-            if (!windowShouldBeBlurred(w))
-                continue;
-
-            hasWindows = true;
-            break;
-        }
-    }
-
-    for (auto const& m : State::monitorState()->monitors()) {
-        for (auto const& lsl : m->m_layerSurfaceLayers) {
-            for (auto const& ls : lsl) {
-                if (!ls->m_layerSurface || ls->m_ruleApplicator->xray().valueOrDefault() != 1)
-                    continue;
-
-                // if (ls->layerSurface->surface->opaque && ls->alpha->value() >= 1.f)
-                //     continue;
-
-                hasWindows = true;
-                break;
-            }
-        }
-    }
-
-    if (!hasWindows)
-        return;
-
-    g_pHyprRenderer->damageMonitor(pMonitor);
-    pMonitor->m_blurFBShouldRender = true;
-}
-
 void CHyprOpenGLImpl::renderTextureWithBlurInternal(SP<ITexture> tex, const CBox& box, const STextureRenderData& data) {
     auto& m_renderData = g_pHyprRenderer->m_renderData;
     RASSERT(m_renderData.pMonitor, "Tried to render texture with blur without begin()!");
@@ -2173,6 +1915,7 @@ void CHyprOpenGLImpl::renderTextureWithBlurInternal(SP<ITexture> tex, const CBox
             protocolBlur.intersect(CBox{0, 0, box.width, box.height});
             protocolBlur.scale(m_renderData.pMonitor->m_scale);
             protocolBlur.translate(box.pos());
+            m_renderData.renderModif.applyToRegion(protocolBlur);
             if (blurClipRegion.empty())
                 blurClipRegion = protocolBlur;
             else
@@ -2511,10 +2254,10 @@ void CHyprOpenGLImpl::renderRoundedShadow(const CBox& box, int round, float roun
                 CBox       scaledWindowBox = WINDOWBOX.value();
 
                 const auto PWORKSPACE = PWINDOW->m_workspace;
-                if (PWORKSPACE && !PWINDOW->m_pinned)
+                if (PWORKSPACE && !(PWINDOW->m_state & WINDOW_STATE_PINNED))
                     scaledWindowBox.translate(PWORKSPACE->m_renderOffset->value());
 
-                scaledWindowBox.translate(PWINDOW->m_floatingOffset);
+                scaledWindowBox.translate(PWINDOW->presentation().floatingOffset());
                 scaledWindowBox.translate(-m_renderData.pMonitor->m_position);
                 scaledWindowBox.scale(m_renderData.pMonitor->m_scale).round();
                 m_renderData.renderModif.applyToBox(scaledWindowBox);
@@ -2522,7 +2265,7 @@ void CHyprOpenGLImpl::renderRoundedShadow(const CBox& box, int round, float roun
                 const auto cutoutTopLeft     = scaledWindowBox.pos() - newBox.pos();
                 const auto cutoutBottomRight = cutoutTopLeft + scaledWindowBox.size();
 
-                float      cutoutRadius = std::max(0.F, sc<float>(PWINDOW->rounding() * m_renderData.pMonitor->m_scale));
+                float      cutoutRadius = std::max(0.F, sc<float>(PWINDOW->presentation().rounding() * m_renderData.pMonitor->m_scale));
                 cutoutRadius            = std::round(cutoutRadius * m_renderData.renderModif.combinedScale());
 
                 shader->setUniformFloat2(SHADER_WINDOW_TOP_LEFT, sc<float>(cutoutTopLeft.x), sc<float>(cutoutTopLeft.y));
@@ -2629,13 +2372,13 @@ bool CHyprOpenGLImpl::saveBufferForMirror(const CBox& box) {
     const auto TEX = g_pHyprRenderer->m_renderData.pMonitor->resources()->m_mirrorTex ? g_pHyprRenderer->m_renderData.pMonitor->resources()->m_mirrorTex :
                                                                                         g_pHyprRenderer->m_renderData.currentFB->getTexture();
     if (!TEX) {
-        Log::logger->log(Log::ERR, "Invalid source texture for mirror");
+        LOG(Log::ERR, "Invalid source texture for mirror");
         return false;
     }
     auto fb    = g_pHyprRenderer->m_renderData.pMonitor->resources()->mirrorFB();
     auto guard = g_pHyprRenderer->bindTempFB(fb);
 
-    Log::logger->log(Log::TRACE, "CM: saveBufferForMirror {} -> {}", TEX->m_imageDescription->value(), g_pHyprRenderer->m_renderData.currentFB->imageDescription()->value());
+    LOG(Log::TRACE, "CM: saveBufferForMirror {} -> {}", TEX->m_imageDescription->value(), g_pHyprRenderer->m_renderData.currentFB->imageDescription()->value());
 
     blend(false);
 
@@ -2676,7 +2419,7 @@ void CHyprOpenGLImpl::destroyMonitorResources(PHLMONITORREF pMonitor) {
     }
 
     if (pMonitor)
-        Log::logger->log(Log::DEBUG, "Monitor {} -> destroyed all render data", pMonitor->m_name);
+        LOG(Log::DEBUG, "Monitor {} -> destroyed all render data", pMonitor->m_name);
 }
 
 void CHyprOpenGLImpl::renderOffToMain(SP<IFramebuffer> off) {
@@ -2804,12 +2547,12 @@ WP<CShader> CHyprOpenGLImpl::getShaderVariant(ePreparedFragmentShader frag, cons
     if (it == variants.end()) {
         auto shader = makeShared<CShader>();
 
-        Log::logger->log(Log::INFO, "compiling feature set {} (TFs {} -> {}) for {}", variant.features, sc<int>(variant.sourceTF), sc<int>(variant.targetTF), FRAG_SHADERS[frag]);
+        LOG(Log::INFO, "compiling feature set {} (TFs {} -> {}) for {}", variant.features, sc<int>(variant.sourceTF), sc<int>(variant.targetTF), FRAG_SHADERS[frag]);
 
         const auto fragSrc = g_pShaderLoader->getVariantSource(frag, variant);
 
         if (!shader->createProgram(m_shaders->TEXVERTSRC, fragSrc, true, true))
-            Log::logger->log(Log::ERR, "shader features {} failed for {}", variant.features, FRAG_SHADERS[frag]);
+            LOG(Log::ERR, "shader features {} failed for {}", variant.features, FRAG_SHADERS[frag]);
 
         it = variants.emplace(variant, std::move(shader)).first;
         return it->second;
@@ -2844,7 +2587,7 @@ void SRenderModifData::applyToBox(CBox& box) {
                     box.y             = OLDPOS.y * COS + OLDPOS.x * SIN;
                 }
             }
-        } catch (std::bad_any_cast& e) { Log::logger->log(Log::ERR, "BUG THIS OR PLUGIN ERROR: caught a bad_any_cast in SRenderModifData::applyToBox!"); }
+        } catch (std::bad_any_cast& e) { LOG(Log::ERR, "BUG THIS OR PLUGIN ERROR: caught a bad_any_cast in SRenderModifData::applyToBox!"); }
     }
 }
 
@@ -2861,7 +2604,7 @@ void SRenderModifData::applyToRegion(CRegion& rg) {
                 case RMOD_TYPE_ROTATE: /* TODO */
                 case RMOD_TYPE_ROTATECENTER: break;
             }
-        } catch (std::bad_any_cast& e) { Log::logger->log(Log::ERR, "BUG THIS OR PLUGIN ERROR: caught a bad_any_cast in SRenderModifData::applyToRegion!"); }
+        } catch (std::bad_any_cast& e) { LOG(Log::ERR, "BUG THIS OR PLUGIN ERROR: caught a bad_any_cast in SRenderModifData::applyToRegion!"); }
     }
 }
 
@@ -2879,7 +2622,7 @@ float SRenderModifData::combinedScale() {
                 case RMOD_TYPE_ROTATE:
                 case RMOD_TYPE_ROTATECENTER: break;
             }
-        } catch (std::bad_any_cast& e) { Log::logger->log(Log::ERR, "BUG THIS OR PLUGIN ERROR: caught a bad_any_cast in SRenderModifData::combinedScale!"); }
+        } catch (std::bad_any_cast& e) { LOG(Log::ERR, "BUG THIS OR PLUGIN ERROR: caught a bad_any_cast in SRenderModifData::combinedScale!"); }
     }
     return scale;
 }
@@ -2890,7 +2633,7 @@ UP<CEGLSync> CEGLSync::create() {
     EGLSyncKHR sync = g_pHyprOpenGL->m_proc.eglCreateSyncKHR(g_pHyprOpenGL->m_eglDisplay, EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr);
 
     if UNLIKELY (sync == EGL_NO_SYNC_KHR) {
-        Log::logger->log(Log::ERR, "eglCreateSyncKHR failed");
+        LOG(Log::ERR, "eglCreateSyncKHR failed");
         return nullptr;
     }
 
@@ -2900,10 +2643,10 @@ UP<CEGLSync> CEGLSync::create() {
     int fd = g_pHyprOpenGL->m_proc.eglDupNativeFenceFDANDROID(g_pHyprOpenGL->m_eglDisplay, sync);
     if UNLIKELY (fd == EGL_NO_NATIVE_FENCE_FD_ANDROID) {
         const auto ERR = eglGetError();
-        Log::logger->log(Log::ERR, "eglDupNativeFenceFDANDROID failed: 0x{:x}", sc<int>(ERR));
+        LOG(Log::ERR, "eglDupNativeFenceFDANDROID failed: 0x{:x}", sc<int>(ERR));
 
         if (g_pHyprOpenGL->m_proc.eglDestroySyncKHR(g_pHyprOpenGL->m_eglDisplay, sync) != EGL_TRUE)
-            Log::logger->log(Log::ERR, "eglDestroySyncKHR failed after eglDupNativeFenceFDANDROID failure");
+            LOG(Log::ERR, "eglDestroySyncKHR failed after eglDupNativeFenceFDANDROID failure");
 
         return nullptr;
     }
@@ -2921,7 +2664,7 @@ CEGLSync::~CEGLSync() {
         return;
 
     if UNLIKELY (g_pHyprOpenGL && g_pHyprOpenGL->m_proc.eglDestroySyncKHR(g_pHyprOpenGL->m_eglDisplay, m_sync) != EGL_TRUE)
-        Log::logger->log(Log::ERR, "eglDestroySyncKHR failed");
+        LOG(Log::ERR, "eglDestroySyncKHR failed");
 }
 
 bool CEGLSync::isValid() {

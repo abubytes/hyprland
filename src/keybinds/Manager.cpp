@@ -13,6 +13,7 @@
 #include "../managers/SessionLockManager.hpp"
 #include "../managers/eventLoop/EventLoopManager.hpp"
 #include "../managers/input/InputManager.hpp"
+#include "../pointer/PointerManager.hpp"
 #include "../protocols/Hotkey.hpp"
 #include "../protocols/InputCapture.hpp"
 #include "../protocols/ShortcutsInhibit.hpp"
@@ -241,7 +242,7 @@ bool CKeybindManager::onKeyEvent(std::any event, SP<IKeyboard> keyboard) {
                 .actionCode       = KEYCODE,
                 .actionTimeMs     = KEY_EVENT.timeMs,
                 .submapAtPress    = std::string{currentSubmap()},
-                .positionAtPress  = g_pInputManager->getMouseCoordsInternal(),
+                .positionAtPress  = Pointer::mgr()->untransformedPosition(),
                 .device           = keyboard,
             })) {
             const auto* existing = m_inputState.find(KEY, keyboard);
@@ -271,7 +272,7 @@ bool CKeybindManager::onKeyEvent(std::any event, SP<IKeyboard> keyboard) {
 
     auto* pressedInput = m_inputState.find(KEY, keyboard);
     if (!pressedInput) {
-        Log::logger->log(Log::ERR, "Keybind release had no matching press record");
+        LOG(Log::ERR, "Keybind release had no matching press record");
         const auto result = processEvent(
             {
                 .heldKeys         = m_inputState.heldKeys(),
@@ -363,7 +364,7 @@ bool CKeybindManager::onMouseEvent(const IPointer::SButtonEvent& event, SP<IPoin
                 .actionMouseCode  = event.button,
                 .actionTimeMs     = event.timeMs,
                 .submapAtPress    = std::string{currentSubmap()},
-                .positionAtPress  = g_pInputManager->getMouseCoordsInternal(),
+                .positionAtPress  = Pointer::mgr()->untransformedPosition(),
                 .device           = pointer,
             })) {
             const auto* existing = m_inputState.find(KEY, pointer);
@@ -487,7 +488,7 @@ SBindResult CKeybindManager::processEvent(const SBindEventContext& context, cons
             continue;
 
         if (MATCH == BIND_MATCH_FULL && !context.pressed && pressedInput) {
-            const bool THRESHOLD_REACHED = pressedInput->positionAtPress.distanceSq(g_pInputManager->getMouseCoordsInternal()) > std::pow(*PDRAGTHRESHOLD, 2);
+            const bool THRESHOLD_REACHED = pressedInput->positionAtPress.distanceSq(Pointer::mgr()->untransformedPosition()) > std::pow(*PDRAGTHRESHOLD, 2);
             if (bind->hasFlag(BIND_FLAG_CLICK) && (g_layoutManager->dragController()->dragThresholdReached() || THRESHOLD_REACHED))
                 continue;
             if (bind->hasFlag(BIND_FLAG_DRAG) && !g_layoutManager->dragController()->dragThresholdReached() && !THRESHOLD_REACHED)
@@ -765,6 +766,10 @@ void CKeybindManager::shadowBinds(const std::optional<SResolvedKey>& excluded, c
                                 [&bind](const auto& input) { return std::ranges::any_of(input.deferredBinds, [&bind](const auto& weak) { return weak.lock() == bind; }); }))
             continue;
 
+        // Multi-key release binds retain their armed state as earlier chord keys are released.
+        // Their overlap suppression is tracked on the armed input instead of through m_shadowed.
+        const bool MATCH_RELEASE = bind->hasFlag(BIND_FLAG_RELEASE) && bind->chordSize() <= 1;
+
         for (const auto& input : m_inputState.pressed()) {
             const auto device = input.device.lock();
             if (!device)
@@ -773,15 +778,17 @@ void CKeybindManager::shadowBinds(const std::optional<SResolvedKey>& excluded, c
             if (excluded && device == excludedDevice && input.key.code == excluded->code && input.key.event == excluded->event)
                 continue;
 
-            if (bind->matches({
-                    .heldKeys         = m_inputState.heldKeys(),
-                    .trigger          = input.key,
-                    .modifiersNow     = MODIFIERS,
-                    .modifiersAtPress = input.modifiersAtPress,
-                    .pressed          = true,
-                    .device           = device,
-                    .submap           = input.submapAtPress,
-                }) == BIND_MATCH_FULL) {
+            const SBindEventContext CONTEXT{
+                .heldKeys         = m_inputState.heldKeys(),
+                .trigger          = input.key,
+                .modifiersNow     = MODIFIERS,
+                .modifiersAtPress = input.modifiersAtPress,
+                .pressed          = !MATCH_RELEASE,
+                .device           = device,
+                .submap           = input.submapAtPress,
+            };
+
+            if (bind->matches(CONTEXT) == BIND_MATCH_FULL) {
                 m_shadowed.emplace(bind);
                 break;
             }

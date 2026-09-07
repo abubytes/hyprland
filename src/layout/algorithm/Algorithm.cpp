@@ -4,7 +4,7 @@
 #include "TiledAlgorithm.hpp"
 #include "../target/WindowTarget.hpp"
 #include "../space/Space.hpp"
-#include "../../desktop/view/Window.hpp"
+#include "../../desktop/view/window/Window.hpp"
 #include "../../desktop/history/WindowHistoryTracker.hpp"
 #include "../../desktop/state/FocusState.hpp"
 #include "../../output/Monitor.hpp"
@@ -56,7 +56,7 @@ void CAlgorithm::removeTarget(SP<ITarget> target) {
         return;
     }
 
-    Log::logger->log(Log::ERR, "BUG THIS: CAlgorithm::removeTarget, but not found");
+    LOG(Log::ERR, "BUG THIS: CAlgorithm::removeTarget, but not found");
 }
 
 void CAlgorithm::moveTarget(SP<ITarget> target, std::optional<Vector2D> focalPoint, bool reposition) {

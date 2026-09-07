@@ -17,6 +17,7 @@ namespace Render {
 }
 
 AQUAMARINE_FORWARD(IBuffer);
+AQUAMARINE_FORWARD(IOutput);
 
 /*
     The naming here is a bit confusing.
@@ -26,6 +27,8 @@ AQUAMARINE_FORWARD(IBuffer);
 */
 
 namespace Pointer {
+
+    class CPointerTransformer;
 
     class CPointerManager {
       public:
@@ -42,7 +45,7 @@ namespace Pointer {
         // only clamps to the layout.
         void warpTo(const Vector2D& logical);
         void move(const Vector2D& deltaLogical);
-        void warpAbsolute(Vector2D abs, SP<IHID> dev);
+        void warpAbsolute(Vector2D abs, SP<IHID> dev, WP<Aquamarine::IOutput> output = {});
 
         void setCursorBuffer(SP<Aquamarine::IBuffer> buf, const Vector2D& hotspot, const float& scale);
         void setCursorSurface(SP<Desktop::View::CWLSurface> buf, const Vector2D& hotspot);
@@ -65,8 +68,13 @@ namespace Pointer {
 
         //
         Vector2D position();
+        Vector2D untransformedPosition() const;
         Vector2D hotspot();
         Vector2D cursorSizeLogical();
+
+        void     addTransformer(const SP<CPointerTransformer>& transformer);
+        void     removeTransformer(const SP<CPointerTransformer>& transformer);
+        bool     hasTransformers() const;
 
         void     recheckEnteredOutputs();
 
@@ -99,6 +107,7 @@ namespace Pointer {
         void onMonitorDisconnect();
         void updateCursorBackend();
         void onCursorMoved();
+        void applyPendingTransformerMutations();
         bool hasCursor();
         void damageIfSoftware();
 
@@ -190,6 +199,15 @@ namespace Pointer {
         bool                                  attemptHardwareCursor(SP<SMonitorPointerState> state);
         SP<Aquamarine::IBuffer>               renderHWCursorBuffer(SP<SMonitorPointerState> state, SP<Render::ITexture> texture);
         bool                                  setHWCursorBuffer(SP<SMonitorPointerState> state, SP<Aquamarine::IBuffer> buf);
+
+        struct STransformerMutation {
+            SP<CPointerTransformer> transformer;
+            bool                    add = false;
+        };
+
+        std::vector<SP<CPointerTransformer>> m_transformers;
+        std::vector<STransformerMutation>    m_pendingTransformerMutations;
+        size_t                               m_transformDepth = 0;
 
         struct {
             CHyprSignalListener monitorAdded;

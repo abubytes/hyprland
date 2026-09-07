@@ -111,7 +111,6 @@ add_compile_options(
   -Wno-missing-field-initializers
   -Wno-narrowing
   -Wno-pointer-arith
-  -Wno-clobbered
   -frtti
   -fmacro-prefix-map=${CMAKE_SOURCE_DIR}/=)
 
@@ -143,7 +142,7 @@ if(NOT glaze_FOUND)
   FetchContent_MakeAvailable(glaze)
 endif()
 
-set(AQUAMARINE_MINIMUM_VERSION 0.9.3)
+set(AQUAMARINE_MINIMUM_VERSION 0.15.0)
 set(HYPRLANG_MINIMUM_VERSION 0.6.7)
 set(HYPRCURSOR_MINIMUM_VERSION 0.1.7)
 set(HYPRUTILS_MINIMUM_VERSION 0.14.0)
@@ -418,6 +417,9 @@ else()
   message(STATUS "SYSTEMD support is requested (NO_SYSTEMD not defined)...")
   add_compile_definitions(USES_SYSTEMD)
 
+  install(FILES ${CMAKE_SOURCE_DIR}/systemd/hyprland-session.target
+          DESTINATION ${CMAKE_INSTALL_LIBDIR}/systemd/user)
+
   # session file -uwsm
   if(NO_UWSM)
     message(STATUS "UWSM support is disabled...")
@@ -543,7 +545,7 @@ if(hyprland_protocols_dep_FOUND)
   pkg_get_variable(HYPRLAND_PROTOCOLS hyprland-protocols pkgdatadir)
   message(STATUS "hyprland-protocols dependency set to ${HYPRLAND_PROTOCOLS}")
 else()
-  set(HYPRLAND_PROTOCOLS "subprojects/hyprland-protocols")
+  set(HYPRLAND_PROTOCOLS "${CMAKE_SOURCE_DIR}/subprojects/hyprland-protocols")
   message(STATUS "hyprland-protocols subproject set to ${HYPRLAND_PROTOCOLS}")
 endif()
 

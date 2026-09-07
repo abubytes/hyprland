@@ -47,7 +47,7 @@ void CDefaultFloatingAlgorithm::newTarget(SP<ITarget> target) {
 
     bool posOverridden = false;
 
-    if (target->window() && target->window()->m_firstMap) {
+    if (target->window() && (target->window()->m_state & Desktop::View::WINDOW_STATE_FIRST_MAP)) {
         const auto WINDOW = target->window();
 
         // set this here so that expressions can use it. This could be wrong of course.
@@ -56,7 +56,7 @@ void CDefaultFloatingAlgorithm::newTarget(SP<ITarget> target) {
         if (WINDOW->m_ruleApplicator->static_.size) {
             const auto COMPUTED = WINDOW->calculateExpression(*WINDOW->m_ruleApplicator->static_.size);
             if (!COMPUTED)
-                Log::logger->log(Log::ERR, "failed to parse {} as an expression", WINDOW->m_ruleApplicator->static_.size->toString());
+                LOG(Log::ERR, "failed to parse {} as an expression", WINDOW->m_ruleApplicator->static_.size->toString());
             else {
                 windowGeometry.w = COMPUTED->x;
                 windowGeometry.h = COMPUTED->y;
@@ -69,7 +69,7 @@ void CDefaultFloatingAlgorithm::newTarget(SP<ITarget> target) {
         if (WINDOW->m_ruleApplicator->static_.position) {
             const auto COMPUTED = WINDOW->calculateExpression(*WINDOW->m_ruleApplicator->static_.position);
             if (!COMPUTED)
-                Log::logger->log(Log::ERR, "failed to parse {} as an expression", WINDOW->m_ruleApplicator->static_.position->toString());
+                LOG(Log::ERR, "failed to parse {} as an expression", WINDOW->m_ruleApplicator->static_.position->toString());
             else {
                 windowGeometry.x = COMPUTED->x + MONITOR_POS.x;
                 windowGeometry.y = COMPUTED->y + MONITOR_POS.y;
@@ -91,8 +91,8 @@ void CDefaultFloatingAlgorithm::newTarget(SP<ITarget> target) {
     if (!posOverridden && (!DESIRED_GEOM || !DESIRED_GEOM->pos))
         windowGeometry = CBox{WORK_AREA.middle() - windowGeometry.size() / 2.F, windowGeometry.size()};
 
-    if (!posOverridden                                                                           // pos is overridden by a rule
-        && !(DESIRED_GEOM && DESIRED_GEOM->pos && target->window() && target->window()->m_isX11) // X11 window with a geom
+    if (!posOverridden                                                                                     // pos is overridden by a rule
+        && !(DESIRED_GEOM && DESIRED_GEOM->pos && target->window() && target->window()->backend().isX11()) // X11 window with a geom
     ) {
         const auto POS   = WORK_AREA.middle() - windowGeometry.size() / 2.f;
         windowGeometry.x = POS.x;
@@ -110,24 +110,22 @@ void CDefaultFloatingAlgorithm::newTarget(SP<ITarget> target) {
     // TODO: not very OOP, is it?
     if (const auto WTARGET = dynamicPointerCast<CWindowTarget>(target); WTARGET) {
         const auto PWINDOW = WTARGET->window();
+        const auto TRAITS  = PWINDOW->backend().traits();
 
-        if (PWINDOW->m_X11DoesntWantBorders || (PWINDOW->m_isX11 && PWINDOW->isX11OverrideRedirect())) {
+        if (TRAITS.suggestsNoBorder || (PWINDOW->backend().isX11() && TRAITS.overrideRedirect))
             PWINDOW->finishAnimation();
-        }
 
-        if (!PWINDOW->isX11OverrideRedirect())
+        if (!TRAITS.overrideRedirect)
             Desktop::windowState()->raise(PWINDOW);
-        else {
-            PWINDOW->m_pendingReportedSize = PWINDOW->size(Desktop::View::IGeometric::GEOMETRIC_GOAL);
-            PWINDOW->m_reportedSize        = PWINDOW->m_pendingReportedSize;
-        }
+        else
+            PWINDOW->acknowledgeClientGeometry(PWINDOW->geometricBox(Desktop::View::IGeometric::GEOMETRIC_GOAL));
     }
 
     updateTarget(target);
 }
 
 void CDefaultFloatingAlgorithm::movedTarget(SP<ITarget> target, std::optional<Vector2D> focalPoint) {
-    if (target->window() && target->window()->m_pinned) {
+    if (target->window() && (target->window()->m_state & Desktop::View::WINDOW_STATE_PINNED)) {
         // check if we intersect at all.
 
         const auto BOX = target->position();
@@ -265,7 +263,7 @@ void CDefaultFloatingAlgorithm::moveTargetInDirection(SP<ITarget> t, Math::eDire
         case Math::DIRECTION_RIGHT: pos.x = work.x + work.w - pos.w - EXTENTS.bottomRight.x; break;
         case Math::DIRECTION_UP: pos.y = work.y + EXTENTS.topLeft.y; break;
         case Math::DIRECTION_DOWN: pos.y = work.y + work.h - pos.h - EXTENTS.bottomRight.y; break;
-        default: Log::logger->log(Log::ERR, "Invalid direction in CDefaultFloatingAlgorithm::moveTargetInDirection"); break;
+        default: LOG(Log::ERR, "Invalid direction in CDefaultFloatingAlgorithm::moveTargetInDirection"); break;
     }
 
     setPositionGlobal(t, pos);

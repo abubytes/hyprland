@@ -3,6 +3,7 @@
 #include <sstream>
 #include <any>
 #include <cmath>
+#include <vector>
 
 #define private public
 #include <src/managers/input/InputManager.hpp>
@@ -15,12 +16,19 @@
 #include <src/desktop/rule/layerRule/LayerRuleEffectContainer.hpp>
 #include <src/desktop/rule/windowRule/WindowRuleApplicator.hpp>
 #include <src/desktop/view/LayerSurface.hpp>
+#include <src/desktop/view/window/WindowFullscreenPolicy.hpp>
+#include <src/desktop/view/window/WindowPresentation.hpp>
+#include <src/desktop/Workspace.hpp>
+#include <src/desktop/state/ViewState.hpp>
 #include <src/desktop/state/WindowState.hpp>
+#include <src/layout/target/Target.hpp>
 #include <src/keybinds/Key.hpp>
 #include <src/Compositor.hpp>
 #include <src/desktop/state/FocusState.hpp>
 #include <src/state/MonitorState.hpp>
+#include <src/state/WorkspaceState.hpp>
 #include <src/layout/LayoutManager.hpp>
+#include <src/event/EventBus.hpp>
 #undef private
 
 #include <hyprutils/utils/ScopeGuard.hpp>
@@ -48,7 +56,7 @@ static SDispatchResult test(std::string in) {
 // Trigger a snap move event for the active window
 static SDispatchResult snapMove(std::string in) {
     const auto PLASTWINDOW = Desktop::focusState()->window();
-    if (!PLASTWINDOW->m_isFloating)
+    if (!PLASTWINDOW->isFloating())
         return {.success = false, .error = "Window must be floating"};
 
     Vector2D pos  = PLASTWINDOW->position(Desktop::View::IGeometric::GEOMETRIC_GOAL);
@@ -57,6 +65,106 @@ static SDispatchResult snapMove(std::string in) {
     g_layoutManager->performSnap(pos, size, PLASTWINDOW->layoutTarget(), MBIND_MOVE, -1, size);
 
     PLASTWINDOW->layoutTarget()->setPositionGlobal(CBox{pos, size});
+
+    return {};
+}
+
+static PHLWINDOW windowByClass(const std::string& cls) {
+    for (const auto& window : Desktop::windowState()->windows()) {
+        if (window->metadata().appID() == cls)
+            return window;
+    }
+
+    return nullptr;
+}
+
+static SDispatchResult expectWindowAtWorkspace(const std::string& workspaceSelector, const Vector2D& pos, const std::string& expectedClass, const std::string& ignoreClass) {
+    const auto WORKSPACE = State::workspaceState()->query().string(workspaceSelector).run();
+    if (!WORKSPACE)
+        return {.success = false, .error = std::format("No workspace matching '{}'", workspaceSelector)};
+
+    const auto IGNORE = ignoreClass.empty() ? nullptr : windowByClass(ignoreClass);
+    if (!ignoreClass.empty() && !IGNORE)
+        return {.success = false, .error = std::format("No window with class '{}' to ignore", ignoreClass)};
+
+    const auto WINDOW =
+        Desktop::viewState()->hitTest().windowAtWorkspace(pos, WORKSPACE, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING, IGNORE);
+
+    if (!WINDOW)
+        return {.success = false, .error = std::format("Expected window '{}', got no window", expectedClass)};
+    if (WINDOW->metadata().appID() != expectedClass)
+        return {.success = false, .error = std::format("Expected window '{}', got '{}'", expectedClass, WINDOW->metadata().appID())};
+
+    return {};
+}
+
+static SDispatchResult expectWorkspaceRenameEvent(const std::string& workspaceSelector, const std::string& name) {
+    const auto WORKSPACE = State::workspaceState()->query().string(workspaceSelector).run();
+    if (!WORKSPACE)
+        return {.success = false, .error = std::format("No workspace matching '{}'", workspaceSelector)};
+
+    size_t          eventCount = 0;
+    PHLWORKSPACEREF eventWorkspace;
+    std::string     eventName;
+    const auto      LISTENER = Event::bus()->m_events.workspace.renamed.listen([&](PHLWORKSPACEREF workspace) {
+        ++eventCount;
+        eventWorkspace = workspace;
+        if (const auto WORKSPACE = workspace.lock())
+            eventName = WORKSPACE->m_name;
+    });
+
+    WORKSPACE->rename(name);
+
+    if (eventCount != 1)
+        return {.success = false, .error = std::format("Expected one workspace rename event, got {}", eventCount)};
+    if (eventWorkspace.lock() != WORKSPACE)
+        return {.success = false, .error = "Workspace rename event carried the wrong workspace"};
+    if (eventName != name)
+        return {.success = false, .error = std::format("Workspace rename event observed name '{}', expected '{}'", eventName, name)};
+
+    return {};
+}
+
+static SDispatchResult testDragLifecycle(const std::string& cls) {
+    const auto WINDOW = windowByClass(cls);
+    if (!WINDOW)
+        return {.success = false, .error = std::format("No window with class '{}'", cls)};
+
+    const auto TARGET = WINDOW->layoutTarget();
+    if (!TARGET)
+        return {.success = false, .error = "Window has no layout target"};
+
+    const auto& CONTROLLER = g_layoutManager->dragController();
+    if (CONTROLLER->target())
+        return {.success = false, .error = "A drag is already active"};
+
+    std::vector<std::string> events;
+    bool                     motionHadTarget = false;
+    bool                     endedWasReset   = false;
+    const auto               MOTION_LISTENER = CONTROLLER->m_events.motion.listen([&] {
+        events.emplace_back("motion");
+        motionHadTarget = !!CONTROLLER->target();
+    });
+    const auto               ENDED_LISTENER  = CONTROLLER->m_events.ended.listen([&] {
+        events.emplace_back("ended");
+        endedWasReset = !CONTROLLER->target() && CONTROLLER->mode() == MBIND_INVALID;
+    });
+
+    const auto               START = TARGET->position().middle();
+    Pointer::pointerController()->warpTo(START, true);
+    g_layoutManager->beginDragTarget(TARGET, MBIND_MOVE);
+    g_layoutManager->moveMouse(START + Vector2D{100, 100});
+    const bool ENDED       = g_layoutManager->endDragTarget();
+    const bool ENDED_AGAIN = g_layoutManager->endDragTarget();
+
+    if (!ENDED || ENDED_AGAIN)
+        return {.success = false, .error = std::format("Unexpected drag end results: first {}, second {}", ENDED, ENDED_AGAIN)};
+    if (events != std::vector<std::string>{"motion", "ended"})
+        return {.success = false, .error = std::format("Expected one motion and one ended event, got {} total events", events.size())};
+    if (!motionHadTarget)
+        return {.success = false, .error = "Drag motion event fired without an active target"};
+    if (!endedWasReset)
+        return {.success = false, .error = "Drag ended event fired before state was reset"};
 
     return {};
 }
@@ -78,7 +186,7 @@ static SDispatchResult dragWindow(std::string in) {
     } catch (...) { return {.success = false, .error = "invalid input"}; }
 
     for (const auto& window : Desktop::windowState()->windows()) {
-        if (window->m_class != cls)
+        if (window->metadata().appID() != cls)
             continue;
 
         const auto target = window->layoutTarget();
@@ -164,9 +272,134 @@ class CTestMouse : public IPointer {
     bool m_isVirtual = false;
 };
 
-SP<CTestMouse>         g_mouse;
-SP<CTestKeyboard>      g_keyboard;
-SP<CTestKeyboard>      g_keyboard2;
+class CKeyboardEventRecorder : public IKeyboardEventHandler {
+  public:
+    struct SEvent {
+        uint32_t              keycode = 0;
+        wl_keyboard_key_state state   = WL_KEYBOARD_KEY_STATE_RELEASED;
+    };
+
+    virtual void onKeyboardKey(const IKeyboard::SKeyEvent& event, SP<IKeyboard>) override {
+        m_events.emplace_back(SEvent{
+            .keycode = event.keycode,
+            .state   = event.state,
+        });
+    }
+
+    std::vector<SEvent> m_events;
+};
+
+struct SPinchScaleEvents {
+    size_t             beginCount = 0;
+    size_t             endCount   = 0;
+    float              beginScale = 0.F;
+    float              endScale   = 0.F;
+    std::vector<float> updateScales;
+};
+
+class CPinchScaleRecorder : public ITrackpadGesture {
+  public:
+    CPinchScaleRecorder(SP<SPinchScaleEvents> events) : m_events(std::move(events)) {
+        ;
+    }
+
+    virtual void begin(const STrackpadGestureBegin& event) override {
+        ++m_events->beginCount;
+        m_events->beginScale = event.scale;
+        ITrackpadGesture::begin(event);
+    }
+
+    virtual void update(const STrackpadGestureUpdate& event) override {
+        m_events->updateScales.emplace_back(event.scale);
+    }
+
+    virtual void end(const STrackpadGestureEnd& event) override {
+        ++m_events->endCount;
+        m_events->endScale = event.scale;
+    }
+
+  private:
+    SP<SPinchScaleEvents> m_events;
+};
+
+SP<CTestMouse>             g_mouse;
+SP<CTestKeyboard>          g_keyboard;
+SP<CTestKeyboard>          g_keyboard2;
+SP<CKeyboardEventRecorder> g_keyboardEventRecorder;
+
+static SDispatchResult     registerKeyboardEventRecorder(std::string in) {
+    if (!g_keyboardEventRecorder)
+        g_keyboardEventRecorder = makeShared<CKeyboardEventRecorder>();
+    else
+        g_pSeatManager->m_keyboardEventHandlers.remove(g_keyboardEventRecorder);
+
+    g_keyboardEventRecorder->m_events.clear();
+    g_pSeatManager->m_keyboardEventHandlers.push(g_keyboardEventRecorder);
+    return {};
+}
+
+static SDispatchResult testPinchDeltaScale(float scale) {
+    constexpr size_t                    FINGERS         = 42;
+    constexpr eTrackpadGestureDirection DIRECTION       = TRACKPAD_GESTURE_DIR_PINCH;
+    constexpr bool                      DISABLE_INHIBIT = true;
+
+    if (g_pTrackpadGestures->m_activeGesture)
+        return {.success = false, .error = "A trackpad gesture is already active"};
+
+    const auto  OLD_MODS = g_pInputManager->m_lastMods;
+    CScopeGuard RESTORE_MODS([OLD_MODS] { g_pInputManager->m_lastMods = OLD_MODS; });
+    g_pInputManager->m_lastMods = Input::HL_MODIFIER_NONE;
+
+    const auto EVENTS = makeShared<SPinchScaleEvents>();
+    const auto ADDED  = g_pTrackpadGestures->addGesture(makeUnique<CPinchScaleRecorder>(EVENTS), FINGERS, DIRECTION, Input::HL_MODIFIER_NONE, scale, DISABLE_INHIBIT);
+    if (!ADDED)
+        return {.success = false, .error = ADDED.error()};
+
+    g_pTrackpadGestures->gestureBegin(IPointer::SPinchBeginEvent{.fingers = FINGERS});
+    g_pTrackpadGestures->gestureUpdate(IPointer::SPinchUpdateEvent{.fingers = FINGERS, .scale = 1.2});
+    g_pTrackpadGestures->gestureUpdate(IPointer::SPinchUpdateEvent{.fingers = FINGERS, .scale = 1.4});
+    g_pTrackpadGestures->gestureEnd(IPointer::SPinchEndEvent{.cancelled = true});
+
+    const auto REMOVED = g_pTrackpadGestures->removeGesture(FINGERS, DIRECTION, Input::HL_MODIFIER_NONE, scale, DISABLE_INHIBIT);
+    if (!REMOVED)
+        return {.success = false, .error = REMOVED.error()};
+
+    const auto SCALE_MATCHES = [scale](float actual) { return std::abs(actual - scale) < 0.001F; };
+    if (EVENTS->beginCount != 1 || EVENTS->updateScales.size() != 2 || EVENTS->endCount != 1)
+        return {.success = false,
+                .error   = std::format("Unexpected pinch callback counts: begin {}, update {}, end {}", EVENTS->beginCount, EVENTS->updateScales.size(), EVENTS->endCount)};
+    if (!SCALE_MATCHES(EVENTS->beginScale) || !std::ranges::all_of(EVENTS->updateScales, SCALE_MATCHES) || !SCALE_MATCHES(EVENTS->endScale))
+        return {.success = false, .error = std::format("Configured pinch scale {} was not propagated to every callback", scale)};
+
+    return {};
+}
+
+static SDispatchResult removeKeyboardEventRecorder(std::string in) {
+    if (g_keyboardEventRecorder)
+        g_pSeatManager->m_keyboardEventHandlers.remove(g_keyboardEventRecorder);
+
+    return {};
+}
+
+static SDispatchResult expectKeyboardEvents(const std::vector<CKeyboardEventRecorder::SEvent>& expected) {
+    if (!g_keyboardEventRecorder)
+        return {.success = false, .error = "Keyboard event recorder has not been registered"};
+
+    if (g_keyboardEventRecorder->m_events.size() != expected.size())
+        return {.success = false, .error = std::format("Expected {} keyboard events, recorded {}", expected.size(), g_keyboardEventRecorder->m_events.size())};
+
+    for (size_t i = 0; i < expected.size(); ++i) {
+        const auto& ACTUAL = g_keyboardEventRecorder->m_events[i];
+        if (ACTUAL.keycode == expected[i].keycode && ACTUAL.state == expected[i].state)
+            continue;
+
+        return {.success = false,
+                .error   = std::format("Keyboard event {}: expected keycode {} state {}, recorded keycode {} state {}", i, expected[i].keycode, sc<uint32_t>(expected[i].state),
+                                       ACTUAL.keycode, sc<uint32_t>(ACTUAL.state))};
+    }
+
+    return {};
+}
 
 static SDispatchResult pressAlt(std::string in) {
     g_pInputManager->m_lastMods = in == "1" ? Input::HL_MODIFIER_ALT : Input::HL_MODIFIER_NONE;
@@ -280,7 +513,7 @@ static SDispatchResult expectCursorZoom(std::string in) {
             return {.success = false, .error = "invalid input"};
     }
 
-    const auto PMONITOR = State::monitorState()->query().vec(g_pInputManager->getMouseCoordsInternal()).run();
+    const auto PMONITOR = State::monitorState()->query().vec(Pointer::mgr()->untransformedPosition()).run();
 
     if (!PMONITOR)
         return {.success = false, .error = "No monitor under cursor"};
@@ -346,7 +579,7 @@ static SDispatchResult scroll(std::string in) {
         by = std::stod(in);
     } catch (...) { return SDispatchResult{.success = false, .error = "invalid input"}; }
 
-    Log::logger->log(Log::DEBUG, "tester: scrolling by {}", by);
+    LOG(Log::DEBUG, "tester: scrolling by {}", by);
 
     g_mouse->m_pointerEvents.axis.emit(IPointer::SAxisEvent{
         .delta         = by,
@@ -367,7 +600,7 @@ static SDispatchResult click(std::string in) {
         pressed = std::stoul(std::string{data[1]}) == 1;
     } catch (...) { return {.success = false, .error = "invalid input"}; }
 
-    Log::logger->log(Log::DEBUG, "tester: mouse button {} state {}", button, pressed);
+    LOG(Log::DEBUG, "tester: mouse button {} state {}", button, pressed);
 
     g_mouse->m_pointerEvents.button.emit(IPointer::SButtonEvent{
         .timeMs = sc<uint32_t>(Time::millis(Time::steadyNow())),
@@ -480,8 +713,8 @@ static SDispatchResult checkKeyboardFocusWindow(std::string in) {
     if (!PWINDOW)
         return {.success = false, .error = "Keyboard focus surface is not a window"};
 
-    if (PWINDOW->m_class != in)
-        return {.success = false, .error = std::format("Keyboard focus window class is '{}', expected '{}'", PWINDOW->m_class, in)};
+    if (PWINDOW->metadata().appID() != in)
+        return {.success = false, .error = std::format("Keyboard focus window class is '{}', expected '{}'", PWINDOW->metadata().appID(), in)};
 
     return {};
 }
@@ -560,7 +793,7 @@ static SDispatchResult checkPointerFocusLayer(std::string in) {
     if (!LAYER) {
         const auto WINDOW = Desktop::viewState()->query().type(Desktop::View::VIEW_TYPE_WINDOW).surface(POINTERSURF).runWindow();
         if (WINDOW)
-            return {.success = false, .error = std::format("Pointer focus is a window surface with class '{}'", WINDOW->m_class)};
+            return {.success = false, .error = std::format("Pointer focus is a window surface with class '{}'", WINDOW->metadata().appID())};
 
         return {.success = false, .error = std::format("Pointer focus is not a layer surface, view type is {}", VIEW ? sc<int>(VIEW->type()) : -1)};
     }
@@ -592,7 +825,7 @@ static SDispatchResult setPointerFocusLayer(std::string in) {
 
 static SDispatchResult softFocusWindowByClass(std::string in) {
     for (const auto& window : Desktop::windowState()->windows()) {
-        if (window->m_class != in)
+        if (window->metadata().appID() != in)
             continue;
 
         Desktop::focusState()->rawWindowFocus(window, Desktop::FOCUS_REASON_FFM);
@@ -608,14 +841,25 @@ static SDispatchResult floatingFocusOnFullscreen(std::string in) {
     if (!PLASTWINDOW)
         return {.success = false, .error = "No window"};
 
-    if (!PLASTWINDOW->m_isFloating)
+    if (!PLASTWINDOW->isFloating())
         return {.success = false, .error = "Window must be floating"};
 
-    if (PLASTWINDOW->alphaTotalGoal() != 1.F)
+    if (PLASTWINDOW->presentation().alphaTotalGoal() != 1.F)
         return {.success = false, .error = "floating window doesnt restore it opacity when focused on fullscreen workspace"};
 
-    if (!PLASTWINDOW->m_allowedOverFullscreen)
+    if (!PLASTWINDOW->fullscreenPolicy().allowedOverFullscreen())
         return {.success = false, .error = "floating window doesnt get flagged as allowedOverFullscreen"};
+
+    return {};
+}
+
+static SDispatchResult expectNoMaximizeEcho(std::string in) {
+    const auto WINDOW = Desktop::focusState()->window();
+    if (!WINDOW)
+        return {.success = false, .error = "No window"};
+
+    if (WINDOW->fullscreenPolicy().consumeExpectedMaximizeEcho(true))
+        return {.success = false, .error = "Window has a stale maximize echo expectation"};
 
     return {};
 }
@@ -641,6 +885,26 @@ static int luaDragWindow(lua_State* L) {
     const auto x   = (double)luaL_checknumber(L, 2);
     const auto y   = (double)luaL_checknumber(L, 3);
     return luaResult(L, ::dragWindow(std::format("{},{},{}", cls, x, y)));
+}
+
+static int luaExpectWindowAtWorkspace(lua_State* L) {
+    const auto WORKSPACE = std::string{luaL_checkstring(L, 1)};
+    const auto POS       = Vector2D{luaL_checknumber(L, 2), luaL_checknumber(L, 3)};
+    const auto EXPECTED  = std::string{luaL_checkstring(L, 4)};
+    const auto IGNORE    = lua_gettop(L) > 4 ? std::string{luaL_checkstring(L, 5)} : std::string{};
+    return luaResult(L, ::expectWindowAtWorkspace(WORKSPACE, POS, EXPECTED, IGNORE));
+}
+
+static int luaExpectWorkspaceRenameEvent(lua_State* L) {
+    return luaResult(L, ::expectWorkspaceRenameEvent(luaL_checkstring(L, 1), luaL_checkstring(L, 2)));
+}
+
+static int luaTestDragLifecycle(lua_State* L) {
+    return luaResult(L, ::testDragLifecycle(luaL_checkstring(L, 1)));
+}
+
+static int luaTestPinchDeltaScale(lua_State* L) {
+    return luaResult(L, ::testPinchDeltaScale(luaL_checknumber(L, 1)));
 }
 
 static int luaVkb(lua_State* L) {
@@ -723,6 +987,31 @@ static int luaSetMods(lua_State* L) {
     return luaResult(L, ::setMods(std::format("{},{},{},{},{}", kbIndex, depressed, latched, locked, group)));
 }
 
+static int luaRegisterKeyboardEventRecorder(lua_State* L) {
+    return luaResult(L, ::registerKeyboardEventRecorder(""));
+}
+
+static int luaRemoveKeyboardEventRecorder(lua_State* L) {
+    return luaResult(L, ::removeKeyboardEventRecorder(""));
+}
+
+static int luaExpectKeyboardEvents(lua_State* L) {
+    const int ARGS = lua_gettop(L);
+    if (ARGS % 2 != 0)
+        return luaL_error(L, "expected keycode/state pairs");
+
+    std::vector<CKeyboardEventRecorder::SEvent> expected;
+    expected.reserve(ARGS / 2);
+    for (int i = 1; i <= ARGS; i += 2) {
+        expected.emplace_back(CKeyboardEventRecorder::SEvent{
+            .keycode = sc<uint32_t>(luaL_checkinteger(L, i)),
+            .state   = sc<wl_keyboard_key_state>(luaL_checkinteger(L, i + 1)),
+        });
+    }
+
+    return luaResult(L, ::expectKeyboardEvents(expected));
+}
+
 static int luaNullfocus(lua_State* L) {
     return luaResult(L, ::nullfocus(""));
 }
@@ -767,17 +1056,25 @@ static int luaFloatingFocusOnFullscreen(lua_State* L) {
     return luaResult(L, ::floatingFocusOnFullscreen(""));
 }
 
+static int luaExpectNoMaximizeEcho(lua_State* L) {
+    return luaResult(L, ::expectNoMaximizeEcho(""));
+}
+
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     PHANDLE = handle;
 
     auto addLuaFn = [](const std::string& name, PLUGIN_LUA_FN fn) {
         if (!HyprlandAPI::addLuaFunction(PHANDLE, "test", name, fn))
-            Log::logger->log(Log::ERR, "hyprtester plugin: failed to register hl.plugin.test.{}", name);
+            LOG(Log::ERR, "hyprtester plugin: failed to register hl.plugin.test.{}", name);
     };
 
     addLuaFn("test", ::luaTest);
     addLuaFn("snapmove", ::luaSnapMove);
     addLuaFn("drag_window", ::luaDragWindow);
+    addLuaFn("expect_window_at_workspace", ::luaExpectWindowAtWorkspace);
+    addLuaFn("expect_workspace_rename_event", ::luaExpectWorkspaceRenameEvent);
+    addLuaFn("test_drag_lifecycle", ::luaTestDragLifecycle);
+    addLuaFn("test_pinch_delta_scale", ::luaTestPinchDeltaScale);
     addLuaFn("vkb", ::luaVkb);
     addLuaFn("alt", ::luaAlt);
     addLuaFn("gesture", ::luaGesture);
@@ -790,6 +1087,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addLuaFn("keybind2", ::luaKeybind2);
     addLuaFn("keybind_modmask", ::luaKeybindMask);
     addLuaFn("set_mods", ::luaSetMods);
+    addLuaFn("register_keyboard_event_recorder", ::luaRegisterKeyboardEventRecorder);
+    addLuaFn("remove_keyboard_event_recorder", ::luaRemoveKeyboardEventRecorder);
+    addLuaFn("expect_keyboard_events", ::luaExpectKeyboardEvents);
     addLuaFn("nullfocus", ::luaNullfocus);
     addLuaFn("clear_surface_focus", ::luaClearSurfaceFocus);
     addLuaFn("check_keyboard_focus_window", ::luaCheckKeyboardFocusWindow);
@@ -801,6 +1101,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addLuaFn("set_pointer_focus_layer", ::luaSetPointerFocusLayer);
     addLuaFn("window_soft_focus", ::luaSoftFocusWindowByClass);
     addLuaFn("floating_focus_on_fullscreen", ::luaFloatingFocusOnFullscreen);
+    addLuaFn("expect_no_maximize_echo", ::luaExpectNoMaximizeEcho);
 
     // init mouse
     g_mouse = CTestMouse::create(false);
@@ -818,6 +1119,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
+    removeKeyboardEventRecorder("");
+    g_keyboardEventRecorder.reset();
     g_mouse->destroy();
     g_mouse.reset();
     g_keyboard->destroy();

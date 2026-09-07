@@ -34,6 +34,11 @@ static std::string evalLua(std::string_view code) {
     return getFromSocket(std::format("/eval {}", code));
 }
 
+TEST_CASE(pinchDeltaScalePropagation) {
+    OK(evalLua("hl.plugin.test.test_pinch_delta_scale(2.5)"));
+    OK(evalLua("hl.plugin.test.test_pinch_delta_scale(-2.0)"));
+}
+
 TEST_CASE(live_gesture_callbacks) {
     OK(evalLua(R"(
         __liveGesture = { swipe = { start = 0, update = 0, finish = 0 } }
@@ -180,6 +185,8 @@ TEST_CASE(live_gesture_callbacks) {
 
     EXPECT_CONTAINS(evalLua("hl.gesture({ fingers = 8, direction = 'up', action = { start = 1 } })"), "action.start must be a function");
     EXPECT_CONTAINS(evalLua("hl.gesture({ fingers = 8, direction = 'up', action = {} })"), "must define at least one of start, update, end, or finish");
+    EXPECT_CONTAINS(evalLua("hl.gesture({ fingers = 8, direction = 'up', action = function() end, scale = 0 })"),
+                    "value must be between -10 and -0.1 or between 0.1 and 10 - It's currently: 0");
 }
 
 // TODO: decompose this into multiple test cases

@@ -3,7 +3,8 @@
 #include "LuaObjectHelpers.hpp"
 
 #include "../../../desktop/view/Group.hpp"
-#include "../../../desktop/view/Window.hpp"
+#include "../../../desktop/view/window/Window.hpp"
+#include "../../../desktop/view/window/WindowGroupMembership.hpp"
 
 #include <optional>
 #include <string_view>
@@ -92,13 +93,13 @@ static int groupAdd(lua_State* L) {
             return 0;
     }
 
-    if (window->m_group == group)
+    if (window->grouping().group() == group)
         return 0;
 
     if (group->denied())
         return Config::Lua::Bindings::Internal::configError(L, "{}: target group is denied", FN);
 
-    if (!window->canBeGroupedInto(group))
+    if (!window->grouping().canBeGroupedInto(group))
         return Config::Lua::Bindings::Internal::configError(L, "{}: window cannot be added to group", FN);
 
     group->add(window, index);
@@ -138,7 +139,7 @@ static int groupIndex(lua_State* L) {
     auto*      ref   = sc<WP<Desktop::View::CGroup>*>(luaL_checkudata(L, 1, MT));
     const auto group = ref->lock();
     if (!group) {
-        Log::logger->log(Log::DEBUG, "[lua] Tried to access an expired object");
+        LOG(Log::DEBUG, "[lua] Tried to access an expired object");
         lua_pushnil(L);
         return 1;
     }

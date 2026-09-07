@@ -219,8 +219,6 @@ namespace {
          [](ILuaConfigValue* v, Config::CWorkspaceRule& r) { r.m_decorate = *sc<const Config::BOOL*>(v->data()); }},
         {"no_shadow", []() -> ILuaConfigValue* { return new CLuaConfigBool(false); },
          [](ILuaConfigValue* v, Config::CWorkspaceRule& r) { r.m_noShadow = *sc<const Config::BOOL*>(v->data()); }},
-        {"no_wobble", []() -> ILuaConfigValue* { return new CLuaConfigBool(false); },
-         [](ILuaConfigValue* v, Config::CWorkspaceRule& r) { r.m_noWobble = *sc<const Config::BOOL*>(v->data()); }},
         {"on_created_empty", []() -> ILuaConfigValue* { return new CLuaConfigString(STRVAL_EMPTY); },
          [](ILuaConfigValue* v, Config::CWorkspaceRule& r) { r.m_onCreatedEmptyRunCmd = *sc<const Config::STRING*>(v->data()); }},
         {"default_name", []() -> ILuaConfigValue* { return new CLuaConfigString(STRVAL_EMPTY); },
@@ -359,15 +357,20 @@ static int hlCurve(lua_State* L) {
         {
             CScopeGuard x([L] { lua_pop(L, 1); });
 
-            lua_getfield(L, 2, "dampening");
+            lua_getfield(L, 2, "damping");
+            if (lua_isnil(L, -1)) {
+                lua_pop(L, 1);
+                // Old typo form, please add a deprecation notice if you ever plan on removing these
+                lua_getfield(L, 2, "dampening");
+            }
 
             if (!lua_isnumber(L, -1))
-                return Internal::configError(L, std::format("hl.curve(\"{}\"): dampening expects a number", name));
+                return Internal::configError(L, std::format("hl.curve(\"{}\"): damping expects a number", name));
 
             curve.damping = lua_tonumber(L, -1);
 
             if (curve.damping <= 0.5F)
-                return Internal::configError(L, std::format("hl.curve(\"{}\"): dampening expects a number >= 0.5", name));
+                return Internal::configError(L, std::format("hl.curve(\"{}\"): damping expects a number >= 0.5", name));
         }
 
         {
@@ -897,13 +900,19 @@ static int hlGesture(lua_State* L) {
     float deltaScale = 1.F;
     lua_getfield(L, 1, "scale");
     if (!lua_isnil(L, -1)) {
-        CLuaConfigFloat scaleParser(1.F, 0.1F, 10.F);
+        CLuaConfigFloat scaleParser(1.F, -10.F, 10.F);
         auto            scaleErr = scaleParser.parse(L);
         if (scaleErr.errorCode != PARSE_ERROR_OK) {
             lua_pop(L, 1);
             return Internal::configError(L, std::format("hl.gesture: field \"scale\": {}", scaleErr.message));
         }
         deltaScale = scaleParser.parsed();
+        // must be [-10.F, -0.1F] ∪ [0.1F, 10.F]
+        // < -10 and >10 checks are made above
+        if (deltaScale > -0.1F && deltaScale < 0.1F) {
+            lua_pop(L, 1);
+            return Internal::configError(L, "hl.gesture: field \"scale\": value must be between -10 and -0.1 or between 0.1 and 10 - It's currently: {}", deltaScale);
+        }
     }
     lua_pop(L, 1);
 

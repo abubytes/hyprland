@@ -59,7 +59,8 @@ bool CGLFramebuffer::internalAlloc(int w, int h, uint32_t drmFormat) {
 
         glDisable(GL_DEPTH_TEST);
         glDepthMask(GL_FALSE);
-    }
+    } else
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, GL_NONE, 0);
 
     auto status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     RASSERT((status == GL_FRAMEBUFFER_COMPLETE), "Framebuffer incomplete, couldn't create! (FB status: {}, GL Error: 0x{:x})", status, sc<int>(glGetError()));
@@ -67,7 +68,7 @@ bool CGLFramebuffer::internalAlloc(int w, int h, uint32_t drmFormat) {
     if (m_stencilTex && m_stencilTex->ok())
         m_stencilTex->unbind();
 
-    Log::logger->log(Log::DEBUG, "Framebuffer \"{}\" created, status {}", m_name, status);
+    LOG(Log::DEBUG, "Framebuffer \"{}\" created, status {}", m_name, status);
 
     glBindTexture(GL_TEXTURE_2D, 0);
     g_pHyprOpenGL->bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -85,7 +86,8 @@ void CGLFramebuffer::addStencil(SP<ITexture> tex) {
     if (m_stencilTex == tex)
         return;
 
-    RASSERT(!m_fbAllocated, "Should add stencil tex prior to FB allocation")
+    if (m_fbAllocated)
+        LOG(Log::DEBUG, "Attaching a stencil to an allocated fb, will need re-alloc to be applied.");
     m_stencilTex = tex;
 }
 
@@ -150,18 +152,18 @@ void CGLFramebuffer::release() {
 bool CGLFramebuffer::readPixels(CHLBufferReference buffer, uint32_t offsetX, uint32_t offsetY, uint32_t width, uint32_t height) {
     auto shm = buffer->shm();
     if (!shm.success) {
-        LOGM(Log::ERR, "Can't copy: buffer is not shm");
+        LOG(Log::ERR, "Can't copy: buffer is not shm");
         return false;
     }
 
     auto [pixelData, fmt, bufLen] = buffer->beginDataPtr(0); // no need for end, cuz it's shm
     if (!pixelData) {
-        LOGM(Log::ERR, "Can't copy: failed to get shm data pointer");
+        LOG(Log::ERR, "Can't copy: failed to get shm data pointer");
         return false;
     }
 
     if UNLIKELY (!shm.success) {
-        LOGM(Log::ERR, "Can't copy: readPixels target is not a shm buffer");
+        LOG(Log::ERR, "Can't copy: readPixels target is not a shm buffer");
         return false;
     }
 
@@ -174,13 +176,13 @@ bool CGLFramebuffer::readPixels(CHLBufferReference buffer, uint32_t offsetX, uin
 
     if UNLIKELY (READWIDTH == 0 || READHEIGHT == 0 || sc<uint64_t>(offsetX) + READWIDTH > FBW || sc<uint64_t>(offsetY) + READHEIGHT > FBH ||
                  sc<uint64_t>(offsetX) + READWIDTH > BUFW || sc<uint64_t>(offsetY) + READHEIGHT > BUFH) {
-        LOGM(Log::ERR, "Can't copy: readPixels rectangle {} {} {} {} exceeds framebuffer {} or buffer {}", offsetX, offsetY, READWIDTH, READHEIGHT, m_size, buffer->size);
+        LOG(Log::ERR, "Can't copy: readPixels rectangle {} {} {} {} exceeds framebuffer {} or buffer {}", offsetX, offsetY, READWIDTH, READHEIGHT, m_size, buffer->size);
         return false;
     }
 
     const auto PFORMAT = getPixelFormatFromDRM(shm.format);
     if (!PFORMAT) {
-        LOGM(Log::ERR, "Can't copy: failed to find a pixel format");
+        LOG(Log::ERR, "Can't copy: failed to find a pixel format");
         return false;
     }
 
@@ -190,19 +192,19 @@ bool CGLFramebuffer::readPixels(CHLBufferReference buffer, uint32_t offsetX, uin
     const auto readHeight = height > 0 ? height : fbHeight;
 
     if (readWidth == 0 || readHeight == 0 || shm.stride <= 0) {
-        LOGM(Log::ERR, "Can't copy: invalid shm read dimensions");
+        LOG(Log::ERR, "Can't copy: invalid shm read dimensions");
         return false;
     }
 
     if (offsetX > fbWidth || offsetY > fbHeight || readWidth > fbWidth - offsetX || readHeight > fbHeight - offsetY) {
-        LOGM(Log::ERR, "Can't copy: read rect exceeds framebuffer");
+        LOG(Log::ERR, "Can't copy: read rect exceeds framebuffer");
         return false;
     }
 
     const auto shmWidth  = sc<uint32_t>(shm.size.x);
     const auto shmHeight = sc<uint32_t>(shm.size.y);
     if (offsetX > shmWidth || offsetY > shmHeight || readWidth > shmWidth - offsetX || readHeight > shmHeight - offsetY) {
-        LOGM(Log::ERR, "Can't copy: read rect exceeds shm buffer");
+        LOG(Log::ERR, "Can't copy: read rect exceeds shm buffer");
         return false;
     }
 
@@ -211,25 +213,25 @@ bool CGLFramebuffer::readPixels(CHLBufferReference buffer, uint32_t offsetX, uin
     const auto rowBytes    = sc<size_t>(minStride(PFORMAT, readWidth));
 
     if (rowBytes == 0) {
-        LOGM(Log::ERR, "Can't copy: invalid shm row size");
+        LOG(Log::ERR, "Can't copy: invalid shm row size");
         return false;
     }
 
     if (rowOffset > std::numeric_limits<size_t>::max() - rowBytes || rowOffset + rowBytes > strideBytes) {
-        LOGM(Log::ERR, "Can't copy: shm stride is too small");
+        LOG(Log::ERR, "Can't copy: shm stride is too small");
         return false;
     }
 
     const auto lastRow = sc<size_t>(offsetY) + sc<size_t>(readHeight) - 1;
     if (strideBytes > 0 && lastRow > std::numeric_limits<size_t>::max() / strideBytes) {
-        LOGM(Log::ERR, "Can't copy: shm row offset overflows");
+        LOG(Log::ERR, "Can't copy: shm row offset overflows");
         return false;
     }
 
     const auto lastRowStart = lastRow * strideBytes;
     const auto rowEnd       = rowOffset + rowBytes;
     if (lastRowStart > std::numeric_limits<size_t>::max() - rowEnd || lastRowStart + rowEnd > bufLen) {
-        LOGM(Log::ERR, "Can't copy: shm buffer is too small");
+        LOG(Log::ERR, "Can't copy: shm buffer is too small");
         return false;
     }
 
@@ -252,7 +254,7 @@ bool CGLFramebuffer::readPixels(CHLBufferReference buffer, uint32_t offsetX, uin
         else if (stripSwizzleAlpha(*PFORMAT->swizzle) == stripSwizzleAlpha(SWIZZLE_BGRA))
             glFormat = GL_BGRA_EXT;
         else {
-            LOGM(Log::ERR, "Copied frame via shm might be broken or color flipped");
+            LOG(Log::ERR, "Copied frame via shm might be broken or color flipped");
             glFormat = GL_RGBA;
         }
     } else if (glFormat == GL_RGBA)

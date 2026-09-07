@@ -1,5 +1,5 @@
 #include "InputManager.hpp"
-#include "../../desktop/view/Window.hpp"
+#include "../../desktop/view/window/Window.hpp"
 #include "../../protocols/Tablet.hpp"
 #include "../../devices/Tablet.hpp"
 #include "../../pointer/PointerManager.hpp"
@@ -77,8 +77,8 @@ static void refocusTablet(SP<CTablet> tab, SP<CTabletTool> tool, bool motion = f
         else
             local = tool->m_absolutePos * BOX->size();
 
-        if (WINDOW && WINDOW->m_isX11)
-            local = local * WINDOW->m_X11SurfaceScaledBy;
+        if (WINDOW && WINDOW->backend().isX11())
+            local = WINDOW->backend().surfaceLocalToBuffer(local);
 
         PROTO::tablet->motion(tool, local);
         return;
@@ -86,8 +86,8 @@ static void refocusTablet(SP<CTablet> tab, SP<CTabletTool> tool, bool motion = f
 
     auto local = CURSORPOS - BOX->pos();
 
-    if (WINDOW && WINDOW->m_isX11)
-        local = local * WINDOW->m_X11SurfaceScaledBy;
+    if (WINDOW && WINDOW->backend().isX11())
+        local = WINDOW->backend().surfaceLocalToBuffer(local);
 
     PROTO::tablet->motion(tool, local);
 }
@@ -251,7 +251,7 @@ void CInputManager::newTablet(SP<Aquamarine::ITablet> pDevice) {
     try {
         PNEWTABLET->m_hlName = g_pInputManager->getNameForNewDevice(pDevice->getName());
     } catch (std::exception& e) {
-        Log::logger->log(Log::ERR, "Tablet had no name???"); // logic error
+        LOG(Log::ERR, "Tablet had no name???"); // logic error
     }
 
     Pointer::mgr()->attachTablet(PNEWTABLET);
@@ -277,7 +277,7 @@ SP<CTabletTool> CInputManager::ensureTabletToolPresent(SP<Aquamarine::ITabletToo
     try {
         PTOOL->m_hlName = g_pInputManager->getNameForNewDevice(pTool->getName());
     } catch (std::exception& e) {
-        Log::logger->log(Log::ERR, "Tablet had no name???"); // logic error
+        LOG(Log::ERR, "Tablet had no name???"); // logic error
     }
 
     PTOOL->m_events.destroy.listenStatic([this, tool = PTOOL.get()] {
@@ -297,7 +297,7 @@ void CInputManager::newTabletPad(SP<Aquamarine::ITabletPad> pDevice) {
     try {
         PNEWPAD->m_hlName = g_pInputManager->getNameForNewDevice(pDevice->getName());
     } catch (std::exception& e) {
-        Log::logger->log(Log::ERR, "Pad had no name???"); // logic error
+        LOG(Log::ERR, "Pad had no name???"); // logic error
     }
 
     PNEWPAD->m_events.destroy.listenStatic([this, pad = PNEWPAD.get()] {

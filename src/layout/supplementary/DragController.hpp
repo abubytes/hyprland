@@ -2,6 +2,7 @@
 
 #include "../target/Target.hpp"
 #include "../../managers/input/InputManager.hpp"
+#include "../../helpers/signal/Signal.hpp"
 
 #include <optional>
 
@@ -38,6 +39,11 @@ namespace Layout::Supplementary {
 
         SP<ITarget> target() const;
 
+        struct {
+            CSignalT<> motion;
+            CSignalT<> ended;
+        } m_events;
+
       private:
         WP<ITarget>                        m_target;
 
@@ -50,6 +56,7 @@ namespace Layout::Supplementary {
         int                                m_mouseMoveEventCount = 0;
         Vector2D                           m_dragHotspot;
         Vector2D                           m_beginDragXY;
+        Vector2D                           m_beginDragUntransformedXY;
         Vector2D                           m_lastDragXY;
         Vector2D                           m_beginDragPositionXY;
         Vector2D                           m_beginDragSizeXY;
