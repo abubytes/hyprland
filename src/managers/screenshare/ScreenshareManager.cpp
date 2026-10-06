@@ -38,7 +38,8 @@ void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
 
     if (!m_pendingFrames.empty())
         LOG(Log::TRACE, "[SSDBG] outputCommit mon={} id={} virt={} physical={} pending={} sessions={}", monitor ? monitor->m_name : "<none>", monitor ? monitor->m_id : -1,
-             monitor ? monitor->isVirtual() : false, monitor && monitor->physicalMonitor() ? monitor->physicalMonitor()->m_name : "<none>", m_pendingFrames.size(), m_sessions.size());
+            monitor ? monitor->isVirtual() : false, monitor && monitor->physicalMonitor() ? monitor->physicalMonitor()->m_name : "<none>", m_pendingFrames.size(),
+            m_sessions.size());
 
     // if no pending frames, and no sessions are sharing, then unblock ds
     if (m_pendingFrames.empty()) {
@@ -60,15 +61,15 @@ void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
         const bool FRAME_DONE = frame->done();
         if (!frame->m_shared || FRAME_DONE) {
             LOG(Log::TRACE, "[SSDBG] outputCommit skip frame commitMon={} shared={} done={} copied={} failed={}", monitor ? monitor->m_name : "<none>", frame->m_shared, FRAME_DONE,
-                 frame->m_copied, frame->m_failed);
+                frame->m_copied, frame->m_failed);
             return;
         }
 
         const auto SESSIONMONITOR = frame->m_session->monitor();
         const bool MATCH          = isSameCommittedOutput(SESSIONMONITOR, monitor);
         LOG(Log::TRACE, "[SSDBG] outputCommit consider commitMon={} sessionMon={} sessionPhys={} match={} type={} damage={} {} {} {}", monitor ? monitor->m_name : "<none>",
-             SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>", SESSIONMONITOR && SESSIONMONITOR->physicalMonitor() ? SESSIONMONITOR->physicalMonitor()->m_name : "<none>", MATCH,
-             sc<int>(frame->m_session->m_type), frame->m_damage.getExtents().x, frame->m_damage.getExtents().y, frame->m_damage.getExtents().w, frame->m_damage.getExtents().h);
+            SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>", SESSIONMONITOR && SESSIONMONITOR->physicalMonitor() ? SESSIONMONITOR->physicalMonitor()->m_name : "<none>", MATCH,
+            sc<int>(frame->m_session->m_type), frame->m_damage.getExtents().x, frame->m_damage.getExtents().y, frame->m_damage.getExtents().w, frame->m_damage.getExtents().h);
         if (!MATCH)
             return;
 
@@ -76,8 +77,8 @@ void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
             CBox geometry = frame->m_session->m_window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
             // Use the session monitor (virtual/split aware), not the physical commit monitor.
             if (geometry.intersection({SESSIONMONITOR->m_position, SESSIONMONITOR->m_size}).empty()) {
-                LOG(Log::TRACE, "[SSDBG] outputCommit skip window outside sessionMon={} geom={} {} {} {}", SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>", geometry.x, geometry.y,
-                     geometry.w, geometry.h);
+                LOG(Log::TRACE, "[SSDBG] outputCommit skip window outside sessionMon={} geom={} {} {} {}", SESSIONMONITOR ? SESSIONMONITOR->m_name : "<none>", geometry.x,
+                    geometry.y, geometry.w, geometry.h);
                 return;
             }
         }
@@ -257,8 +258,15 @@ bool CScreenshareManager::outputNeedsCopyFB(PHLMONITOR monitor) {
 CScreenshareManager::SOutputCopyFBState CScreenshareManager::outputCopyFBState(PHLMONITOR monitor) {
     SOutputCopyFBState state;
 
+    // user intent -> strategy: split (virtual) heads share the parent's DRM output.
+    // Copy-FB and onOutputCommit are keyed off the physical monitor, so sessions
+    // and pending frames on HDMI-A-1~1/~2 must count against HDMI-A-1. Exact
+    // pointer match left those frames never copied (black Xiaomi screenshare).
     for (const auto& session : m_sessions) {
-        if (!session || !session->isActive() || (session->m_type != SHARE_MONITOR && session->m_type != SHARE_REGION) || session->m_monitor != monitor)
+        if (!session || !session->isActive() || (session->m_type != SHARE_MONITOR && session->m_type != SHARE_REGION))
+            continue;
+
+        if (!isSameCommittedOutput(session->monitor(), monitor))
             continue;
 
         state.activeSessions++;
@@ -272,7 +280,10 @@ CScreenshareManager::SOutputCopyFBState CScreenshareManager::outputCopyFBState(P
     }
 
     for (const auto& frame : m_pendingFrames) {
-        if (!frame || frame->done() || !frame->m_shared || frame->m_session->monitor() != monitor)
+        if (!frame || frame->done() || !frame->m_shared)
+            continue;
+
+        if (!isSameCommittedOutput(frame->m_session->monitor(), monitor))
             continue;
 
         if (frame->m_session->m_type == SHARE_MONITOR) {

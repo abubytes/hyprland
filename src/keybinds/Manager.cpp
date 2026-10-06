@@ -385,8 +385,12 @@ bool CKeybindManager::onMouseEvent(const IPointer::SButtonEvent& event, SP<IPoin
             nullptr, pressedInput);
 
         m_inputState.setForwarded(KEY, pointer, result.passEvent);
+        // user intent -> hold-to-talk mouse binds (press + { release = true })
+        // must stay armed while the button is down. Keyboard press already
+        // excludes the trigger from shadowBinds; do the same here so the
+        // paired release bind is not suppressed until physical up.
         if (!result.passEvent)
-            shadowBinds();
+            shadowBinds(KEY, pointer);
         return result.passEvent && !DRAG_WAS_ACTIVE;
     }
 
