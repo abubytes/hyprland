@@ -280,12 +280,8 @@ namespace Monitor {
         PHLMONITOR   physicalMonitor() const;
         float        getDefaultScale();
         void         changeWorkspace(const PHLWORKSPACE& pWorkspace, bool internal = false, bool noMouseMove = false, bool noFocus = false);
-        void         changeWorkspace(const WORKSPACEID& id, bool internal = false, bool noMouseMove = false, bool noFocus = false);
         void         setSpecialWorkspace(const PHLWORKSPACE& pWorkspace, bool noFocus = false);
-        void         setSpecialWorkspace(const WORKSPACEID& id, bool noFocus = false);
         PHLWORKSPACE getCurrentWorkspace();
-        WORKSPACEID  activeWorkspaceID();
-        WORKSPACEID  activeSpecialWorkspaceID();
         void         scheduleDone();
         uint32_t     isSolitaryBlocked(bool full = false);
         void         recheckSolitary();
@@ -361,28 +357,27 @@ namespace Monitor {
 
         bool                                                        needsCM();
         /// Can do CM without shader (forDSmode ? check output image description : check workbuffer image description)
-        bool                                                               canNoShaderCM(bool forDSmode = false);
-        bool                                                               doesNoShaderCM();
+        bool                                canNoShaderCM(bool forDSmode = false);
+        bool                                doesNoShaderCM();
 
-        bool                                                               m_enabled             = false;
-        bool                                                               m_renderingInitPassed = false;
+        bool                                m_enabled             = false;
+        bool                                m_renderingInitPassed = false;
 
-        PHLWINDOWREF                                                       m_previousFSWindow;
-        bool                                                               m_needsHDRupdate         = false;
-        bool                                                               m_hdrMetadataFromSurface = false;
+        PHLWINDOWREF                        m_previousFSWindow;
+        bool                                m_needsHDRupdate         = false;
+        bool                                m_hdrMetadataFromSurface = false;
 
-        std::optional<dev_t>                                               m_cachedAllocatorDRMDev;
-        std::optional<dev_t>                                               m_cachedCompositorDRMDev;
-        int                                                                m_cachedAllocatorDRMFD  = -1;
-        int                                                                m_cachedCompositorDRMFD = -1;
-        std::optional<bool>                                                m_cachedSameGPU;
+        std::optional<dev_t>                m_cachedAllocatorDRMDev;
+        std::optional<dev_t>                m_cachedCompositorDRMDev;
+        int                                 m_cachedAllocatorDRMFD  = -1;
+        int                                 m_cachedCompositorDRMFD = -1;
+        std::optional<bool>                 m_cachedSameGPU;
 
-        NColorManagement::PImageDescription                                m_imageDescription = NColorManagement::CImageDescription::from(NColorManagement::SImageDescription{});
-        bool                                                               m_noShaderCTM      = false; // sets drm CTM, restore needed
+        NColorManagement::PImageDescription m_imageDescription = NColorManagement::CImageDescription::from(NColorManagement::SImageDescription{});
+        bool                                m_noShaderCTM      = false; // sets drm CTM, restore needed
 
-        bool                                                               m_blurFBDirty        = true;
-        bool                                                               m_blurFBShouldRender = false;
-        std::vector<std::pair<WP<CWLSurfaceResource>, CHLBufferReference>> m_usedAsyncBuffers;
+        bool                                m_blurFBDirty        = true;
+        bool                                m_blurFBShouldRender = false;
 
         // For the list lookup
 
@@ -397,25 +392,21 @@ namespace Monitor {
         WP<Monitor::CMonitorResources>      resources();
 
       private:
-        void                    updateMatrix();
-        Mat3x3                  m_projMatrix;
-        Mat3x3                  m_projOutputMatrix;
+        void                updateMatrix();
+        Mat3x3              m_projMatrix;
+        Mat3x3              m_projOutputMatrix;
 
-        void                    setupDefaultWS(const Config::CMonitorRule&);
-        WORKSPACEID             findAvailableDefaultWS();
-        void                    setSpecialWorkspaceVisualState(bool active);
-        void                    commitDPMSState(bool state);
-        void                    scheduleModeRetry();
-        void                    clearModeRetry();
-        void                    updateVCGTRamps();
-        bool                    trySetFormat(std::span<const uint32_t> formats);
+        void                setSpecialWorkspaceVisualState(bool active);
+        void                commitDPMSState(bool state);
+        void                scheduleModeRetry();
+        void                clearModeRetry();
+        void                updateVCGTRamps();
+        bool                trySetFormat(std::span<const uint32_t> formats);
 
-        bool                    m_doneScheduled  = false;
-        bool                    m_vcgtRampsSet   = false;
-        int                     m_modeRetryCount = 0;
-        SP<CEventLoopTimer>     m_modeRetryTimer;
-
-        std::stack<WORKSPACEID> m_prevWorkSpaces;
+        bool                m_doneScheduled  = false;
+        bool                m_vcgtRampsSet   = false;
+        int                 m_modeRetryCount = 0;
+        SP<CEventLoopTimer> m_modeRetryTimer;
 
         // Resources
         UP<Monitor::CMonitorResources> m_resources;

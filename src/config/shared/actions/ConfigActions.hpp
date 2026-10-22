@@ -5,7 +5,7 @@
 #include <optional>
 
 #include "../../../desktop/DesktopTypes.hpp"
-#include "../../../desktop/Workspace.hpp"
+#include "../../../workspace/HLWorkspace.hpp"
 #include "../../../input/Keys.hpp"
 #include "../../../helpers/math/Direction.hpp"
 #include "../ConfigErrors.hpp"
@@ -46,6 +46,7 @@ namespace Config::Actions {
     ActionResult fullscreenWindow(Fullscreen::eFullscreenMode internalMode, Fullscreen::eFullscreenMode clientMode, bool layoutAware,
                                   std::optional<PHLWINDOW> window = std::nullopt /* Active */);
     ActionResult moveToWorkspace(PHLWORKSPACE ws, bool silent, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
+    ActionResult moveToWorkspace(const std::string& ws, bool silent, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
     ActionResult moveFocus(Math::eDirection dir);
     ActionResult focus(PHLWINDOW window);
     ActionResult moveInDirection(Math::eDirection dir, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
@@ -77,6 +78,7 @@ namespace Config::Actions {
     ActionResult changeWorkspaceID(PHLWORKSPACE ws, int64_t id);
     ActionResult moveToMonitor(PHLWORKSPACE ws, PHLMONITOR mon);
     ActionResult changeWorkspaceOnCurrentMonitor(PHLWORKSPACE ws);
+    ActionResult changeWorkspaceOnCurrentMonitor(const std::string& ws);
     ActionResult toggleSpecial(PHLWORKSPACE special);
 
     ActionResult focusMonitor(PHLMONITOR mon);
@@ -97,8 +99,8 @@ namespace Config::Actions {
 
     ActionResult mouse(const std::string& action);
 
-    ActionResult lockGroups(eTogglableAction action);
-    ActionResult lockActiveGroup(eTogglableAction action);
+    ActionResult lockGroup(eTogglableAction action, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
+    ActionResult lockAllGroups(eTogglableAction action);
     ActionResult moveIntoGroup(Math::eDirection direction, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
     ActionResult moveOutOfGroup(Math::eDirection direction, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
     ActionResult moveGroupWindow(bool forward = true);

@@ -14,7 +14,7 @@
 using namespace Render::GL;
 
 CGLRenderbuffer::~CGLRenderbuffer() {
-    if (!g_pCompositor || g_pCompositor->m_isShuttingDown || !g_pHyprRenderer)
+    if (!g_pCompositor || g_pCompositor->m_isShuttingDown || !g_pHyprRenderer || !g_pHyprOpenGL)
         return;
 
     g_pHyprOpenGL->makeEGLCurrent();
@@ -22,10 +22,8 @@ CGLRenderbuffer::~CGLRenderbuffer() {
     // m_framebuffer is only allocated after createEGLImage() succeeds in the ctor; an early
     // ctor failure (e.g. dmabuf import failing mid-hotplug) leaves it null while we still get
     // destroyed. Guard it like m_rbo/m_image below so teardown of a partial rb doesn't segfault.
-    if (m_framebuffer) {
-        unbind();
+    if (m_framebuffer)
         m_framebuffer->release();
-    }
 
     if (m_rbo)
         glDeleteRenderbuffers(1, &m_rbo);
@@ -35,7 +33,9 @@ CGLRenderbuffer::~CGLRenderbuffer() {
 }
 
 CGLRenderbuffer::CGLRenderbuffer(SP<Aquamarine::IBuffer> buffer, uint32_t format) : IRenderbuffer(buffer, format) {
-    auto dma = buffer->dmabuf();
+    g_pHyprOpenGL->makeEGLCurrent();
+    CFramebufferBindingGuard bindings{g_pHyprOpenGL};
+    auto                     dma = buffer->dmabuf();
 
     m_image = g_pHyprOpenGL->createEGLImage(dma);
     if (m_image == EGL_NO_IMAGE_KHR) {
@@ -61,8 +61,6 @@ CGLRenderbuffer::CGLRenderbuffer(SP<Aquamarine::IBuffer> buffer, uint32_t format
         return;
     }
 
-    GLFB(m_framebuffer)->unbind();
-
     m_listeners.destroyBuffer = buffer->events.destroy.listen([this] { g_pHyprRenderer->onRenderbufferDestroy(this); });
 
     m_good = true;
@@ -70,7 +68,7 @@ CGLRenderbuffer::CGLRenderbuffer(SP<Aquamarine::IBuffer> buffer, uint32_t format
 
 void CGLRenderbuffer::bind() {
     g_pHyprOpenGL->makeEGLCurrent();
-    g_pHyprRenderer->bindFB(m_framebuffer);
+    m_framebuffer->bind();
 }
 
 void CGLRenderbuffer::unbind() {

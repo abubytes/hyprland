@@ -16,14 +16,13 @@
 #include "../pointer/PointerController.hpp"
 #include "../desktop/state/WindowState.hpp"
 #include "../desktop/state/FocusState.hpp"
-#include "../desktop/Workspace.hpp"
+#include "../workspace/HLWorkspace.hpp"
 #include "../desktop/view/window/Window.hpp"
 #include "../config/shared/monitor/MonitorRule.hpp"
 #include "../managers/fullscreen/FullscreenController.hpp"
 #include "../protocols/XDGOutput.hpp"
 #include "WorkspaceState.hpp"
 
-#include <climits>
 #include <cmath>
 #include <format>
 #include <unordered_map>
@@ -191,13 +190,12 @@ PHLMONITOR CMonitorStateTracker::getPrimaryLogicalMonitor(PHLMONITOR pMonitor) {
     return pMonitor;
 }
 
-static WORKSPACEID nextFreeWorkspaceID() {
-    for (WORKSPACEID i = 1; i < LONG_MAX; ++i) {
-        if (!State::workspaceState()->query().id(i).run())
-            return i;
-    }
+static ::Workspace::WorkspaceIDContainer nextFreeWorkspaceID() {
+    ::Workspace::WorkspaceIDContainer id = 1;
+    while (State::workspaceState()->query().numbered(::Workspace::SWorkspaceNumberedID{id}).run())
+        ++id;
 
-    return LONG_MAX;
+    return id;
 }
 
 void CMonitorStateTracker::rebuildVirtualMonitors() {
@@ -235,9 +233,8 @@ void CMonitorStateTracker::rebuildVirtualMonitors() {
 
         const auto OLD_MONITOR = workspace->m_monitor.lock();
         workspace->m_monitor   = monitor;
-        workspace->m_visible   = true;
-        workspace->m_lastMonitor.clear();
-        workspace->m_space->recheckWorkArea();
+        workspace->setVisible(true);
+        workspace->space()->recheckWorkArea();
         workspace->m_events.monitorChanged.emit();
 
         monitor->m_activeWorkspace = workspace;
@@ -260,7 +257,7 @@ void CMonitorStateTracker::rebuildVirtualMonitors() {
 
     auto createWorkspaceFor = [&](PHLMONITOR monitor) -> PHLWORKSPACE {
         const auto ID = nextFreeWorkspaceID();
-        return State::workspaceState()->create(ID, monitor->m_id, std::to_string(ID));
+        return State::workspaceState()->createNumbered(::Workspace::SWorkspaceNumberedID{ID}, monitor);
     };
 
     struct SResolvedSplit {
@@ -467,7 +464,7 @@ void CMonitorStateTracker::rebuildVirtualMonitors() {
 
     const auto FALLBACK_MONITOR = m_monitors.empty() ? PHLMONITOR{} : m_monitors.front();
     for (auto const& workspace : State::workspaceState()->workspacesCopy()) {
-        if (!workspace || workspace->m_isSpecialWorkspace || !FALLBACK_MONITOR)
+        if (!workspace || workspace->type() == ::Workspace::eWorkspaceType::SPECIAL || !FALLBACK_MONITOR)
             continue;
 
         const auto MONITOR = workspace->m_monitor.lock();
@@ -475,8 +472,8 @@ void CMonitorStateTracker::rebuildVirtualMonitors() {
             continue;
 
         workspace->m_monitor = FALLBACK_MONITOR;
-        workspace->m_visible = false;
-        workspace->m_space->recheckWorkArea();
+        workspace->setVisible(false);
+        workspace->space()->recheckWorkArea();
         workspace->m_events.monitorChanged.emit();
 
         for (auto const& w : Desktop::windowState()->windows()) {

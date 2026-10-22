@@ -10,7 +10,7 @@ class CWLOutputProtocol;
 
 class CWLOutputResource {
   public:
-    CWLOutputResource(SP<CWlOutput> resource_, PHLMONITOR pMonitor);
+    CWLOutputResource(SP<CWlOutput> resource_, PHLMONITOR pMonitor, WP<CWLOutputProtocol> owner);
     static SP<CWLOutputResource> fromResource(wl_resource*);
 
     bool                         good();
@@ -35,12 +35,12 @@ class CWLOutputProtocol : public IWaylandProtocol {
 
     virtual void                       bindManager(wl_client* client, void* data, uint32_t ver, uint32_t id);
 
-	std::vector<SP<CWLOutputResource>> outputResourcesFrom(wl_client* client);
-	void                               sendDone();
-	void                               updateMonitor(PHLMONITOR pMonitor);
+    std::vector<SP<CWLOutputResource>> outputResourcesFrom(wl_client* client);
+    void                               sendDone();
+    void                               updateMonitor(PHLMONITOR pMonitor);
 
-	PHLMONITORREF                      m_monitor;
-	WP<CWLOutputProtocol>              m_self;
+    PHLMONITORREF                      m_monitor;
+    WP<CWLOutputProtocol>              m_self;
 
     // will mark the protocol for removal, will be removed when no. of bound outputs is 0 (or when overwritten by a new global)
     void remove();

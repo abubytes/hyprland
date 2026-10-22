@@ -13,7 +13,7 @@
 #include "../../DesktopTypes.hpp"
 #include "../../types/MultiAnimatedVariable.hpp"
 #include "../WLSurface.hpp"
-#include "../../Workspace.hpp"
+#include "../../../workspace/HLWorkspace.hpp"
 #include "../../rule/windowRule/WindowRuleApplicator.hpp"
 #include "../../../protocols/types/ContentType.hpp"
 #include "../types/GeometricMovableAnimated.hpp"
@@ -25,6 +25,10 @@
 
 namespace Config {
     class CWorkspaceRule;
+}
+
+namespace Render {
+    struct SWindowRenderPresentation;
 }
 
 namespace Layout {
@@ -44,6 +48,7 @@ namespace Desktop::View {
     class CWindowGroupMembership;
     class CWindowMetadata;
     class CWindowPresentation;
+    class CWindowStateEventTracker;
     class CWindowSwallowController;
 
     enum eWindowUpdateSource : uint8_t {
@@ -101,8 +106,10 @@ namespace Desktop::View {
     };
 
     struct SInitialWorkspaceToken {
-        PHLWINDOWREF primaryOwner;
-        std::string  workspace;
+        PHLWINDOWREF              primaryOwner;
+        Workspace::WorkspaceID    workspaceID;
+        std::string               workspaceAddress;
+        Workspace::eWorkspaceType workspaceType = Workspace::eWorkspaceType::NORMAL;
     };
 
     struct SClientFullscreenRequest {
@@ -139,6 +146,7 @@ namespace Desktop::View {
         const CWindowFullscreenPolicy&                            fullscreenPolicy() const;
         CWindowGroupMembership&                                   grouping();
         const CWindowGroupMembership&                             grouping() const;
+        CWindowStateEventTracker&                                 stateTracker();
 
         virtual eViewType                                         type() const override;
         virtual bool                                              mapped() const override;
@@ -149,6 +157,7 @@ namespace Desktop::View {
         virtual Types::CMultiAVarContainer<float, uint8_t>&       alpha() override;
         virtual const Types::CMultiAVarContainer<float, uint8_t>& alpha() const override;
         virtual std::optional<uint8_t>                            alphaGenericToKey(eAlphaModifiableProp p) override;
+        virtual bool                                              cantLockCursor() const override;
 
         struct {
             CSignalT<> destroy;
@@ -195,11 +204,13 @@ namespace Desktop::View {
         void                       updateToplevel();
         void                       updateSurfaceScaleTransformDetails(bool force = false);
         void                       moveToWorkspace(PHLWORKSPACE);
+        void                       syncInitialWorkspaceToken(PHLWORKSPACE);
         void                       onUnmap();
         void                       onMap();
         void                       setHidden(bool hidden);
         bool                       isHidden() const;
         bool                       shouldBlur() const;
+        bool                       shouldBlur(const Render::SWindowRenderPresentation& presentation) const;
         bool                       isAllowedOverFullscreen() const;
         bool                       isBlockedByFullscreen() const;
         bool                       isFadingOutUnderFullscreen() const;
@@ -209,9 +220,9 @@ namespace Desktop::View {
         Vector2D                   middle();
         bool                       canBeTorn();
         void                       setSuspended(bool suspend);
-        WORKSPACEID                workspaceID();
         MONITORID                  monitorID();
         bool                       onSpecialWorkspace();
+        const std::string&         workspaceAddress() const;
         void                       activate(bool force = false);
         bool                       clampWindowSize(const std::optional<Vector2D> minSize, const std::optional<Vector2D> maxSize);
         float                      getScrollMouse();
@@ -240,7 +251,6 @@ namespace Desktop::View {
         SP<Layout::ITarget> layoutTarget();
         SP<Layout::ITarget> layoutTarget() const;
         bool                isFloating() const;
-        bool                cantLockCursor() const;
         void                sendClose();
         void                requestClientFullscreen(const SClientFullscreenRequest& request);
 
@@ -271,10 +281,11 @@ namespace Desktop::View {
         void         unmanagedSetGeometry(const CBox& box);
         virtual void onInputBlockStateUpdated(bool blocked) override;
         // For hidden windows and stuff
-        bool        m_hidden        = false;
-        bool        m_suspended     = false;
-        bool        m_isMapped      = false;
-        WORKSPACEID m_lastWorkspace = WORKSPACE_INVALID;
+        bool        m_hidden    = false;
+        bool        m_suspended = false;
+        bool        m_isMapped  = false;
+        std::string m_lastWorkspaceAddress;
+        bool        m_lastWorkspaceSpecial = false;
 
         struct {
             bool activate            = false;
@@ -290,6 +301,7 @@ namespace Desktop::View {
         UP<CWindowMetadata>          m_metadata;
         UP<CWindowPresentation>      m_presentation;
         UP<CWindowEffectsController> m_effects;
+        UP<CWindowStateEventTracker> m_stateTracker;
         SP<Layout::CWindowTarget>    m_target;
         struct {
             CHyprSignalListener map;
@@ -363,7 +375,7 @@ struct std::formatter<PHLWINDOW, CharT> : std::formatter<CharT> {
         std::format_to(out, "[");
         std::format_to(out, "Window {:x}: title: \"{}\"", rc<uintptr_t>(w.get()), w->metadata().title());
         if (formatWorkspace)
-            std::format_to(out, ", workspace: {}", w->m_workspace ? w->workspaceID() : WORKSPACE_INVALID);
+            std::format_to(out, ", workspace: {}", w->m_workspace ? w->m_workspace->addressableName() : "none");
         if (formatMonitor)
             std::format_to(out, ", monitor: {}", w->monitorID());
         if (formatClass)

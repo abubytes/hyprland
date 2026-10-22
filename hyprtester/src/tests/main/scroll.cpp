@@ -851,8 +851,7 @@ TEST_CASE(scroll_LAYOUT_HANDLED_floatingWindowHiding) {
         ASSERT_CONTAINS(floatingOne, "class: floatingOne");
         ASSERT_CONTAINS(floatingOne, "floating: 1");
 
-        // The window itself is FS so allowedOverFullscreen = 0
-        ASSERT_CONTAINS(floatingOne, "allowedOverFullscreen: 0");
+        ASSERT_CONTAINS(floatingOne, "allowedOverFullscreen: 1");
         ASSERT_CONTAINS(floatingOne, "acceptsInput: 1");
 
         ASSERT_CONTAINS(floatingOne, "fullscreen: 1");
@@ -1173,56 +1172,18 @@ TEST_CASE(scroll_LAYOUT_HANDLED_layerVisibilityOnFs) {
 
     OK(getFromSocket("/eval hl.config({ general = { layout = 'scrolling' } })"));
 
-    // For default handled fullscreen
-
     static constexpr const char* LAYER_NAMESPACE = "bar-like-layer";
 
-    ASSERT(spawnLayer(LAYER_NAMESPACE, {"--edge=top", "--layer=top", "--lines=48px", "--focus-policy=not-allowed"}), true);
+    const auto                   spawnLayerAndWaitTillSuccess_TOP = [&]() {
+        ASSERT(spawnLayer(LAYER_NAMESPACE, {"--edge=top", "--layer=top", "--lines=48px", "--focus-policy=not-allowed"}), true);
+        Tests::waitUntilLayersN(1);
+    };
+
+    OK(getFromSocket("/eval hl.config({ general = { layout = 'scrolling' } })"));
 
     SPAWN_KITTY("cat");
-
-    {
-        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
-        EXPECT_CONTAINS(str, "a: 1")
-        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 0");
-    }
-
-    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'set', window = 'class:cat', layout_aware = false })"));
-
-    {
-
-        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
-        EXPECT_CONTAINS(str, "a: 1")
-        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 1");
-    }
-
-    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'unset', window = 'class:cat', layout_aware = false })"));
-
-    {
-        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
-        EXPECT_CONTAINS(str, "a: 1")
-        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 0");
-    }
-
-    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'set', window = 'class:cat', layout_aware = false })"));
-
-    {
-        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
-        EXPECT_CONTAINS(str, "a: 0")
-        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 2");
-    }
-
-    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'unset', window = 'class:cat', layout_aware = false })"));
-
-    {
-        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
-        EXPECT_CONTAINS(str, "a: 1")
-        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 0");
-    }
-
-    // Now we test Layout Handled FS
-
-    // same as above but with layout_aware = false
+    spawnLayerAndWaitTillSuccess_TOP();
+    // same as default handled test but with layout_aware = false -- just testing with top layer for brevity
 
     {
         auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
@@ -1231,7 +1192,6 @@ TEST_CASE(scroll_LAYOUT_HANDLED_layerVisibilityOnFs) {
     }
 
     OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'set', window = 'class:cat' })"));
-
     {
 
         auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
@@ -1240,7 +1200,6 @@ TEST_CASE(scroll_LAYOUT_HANDLED_layerVisibilityOnFs) {
     }
 
     OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'unset', window = 'class:cat' })"));
-
     {
         auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
         EXPECT_CONTAINS(str, "a: 1")
@@ -1248,7 +1207,6 @@ TEST_CASE(scroll_LAYOUT_HANDLED_layerVisibilityOnFs) {
     }
 
     OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'set', window = 'class:cat' })"));
-
     {
         auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
         EXPECT_CONTAINS(str, "a: 0")
@@ -1256,7 +1214,6 @@ TEST_CASE(scroll_LAYOUT_HANDLED_layerVisibilityOnFs) {
     }
 
     OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'unset', window = 'class:cat' })"));
-
     {
         auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
         EXPECT_CONTAINS(str, "a: 1")
@@ -1266,7 +1223,6 @@ TEST_CASE(scroll_LAYOUT_HANDLED_layerVisibilityOnFs) {
     // Scrolling onto FS windows
 
     OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'set', window = 'class:cat' })"));
-
     {
         auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
         EXPECT_CONTAINS(str, "a: 0")
@@ -1276,7 +1232,6 @@ TEST_CASE(scroll_LAYOUT_HANDLED_layerVisibilityOnFs) {
     SPAWN_KITTY("cat2");
 
     OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'set', window = 'class:cat2' })"));
-
     {
         auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
         EXPECT_CONTAINS(str, "a: 1")
@@ -1284,7 +1239,6 @@ TEST_CASE(scroll_LAYOUT_HANDLED_layerVisibilityOnFs) {
     }
 
     OK(getFromSocket("/dispatch hl.dsp.layout('focus l')"));
-
     {
         auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
         EXPECT_CONTAINS(str, "a: 0")
@@ -1315,7 +1269,6 @@ TEST_CASE(scroll_LAYOUT_HANDLED_layerVisibilityOnFs) {
 
     // maximise the floating kitty
     OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'set', window = 'class:floating_cat' })"));
-
     {
         auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
         EXPECT_CONTAINS(str, "a: 1")
@@ -1325,7 +1278,6 @@ TEST_CASE(scroll_LAYOUT_HANDLED_layerVisibilityOnFs) {
     // fullscreen the floating kitty
 
     OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'set', window = 'class:floating_cat' })"));
-
     {
         auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
         EXPECT_CONTAINS(str, "a: 0")
@@ -1335,7 +1287,6 @@ TEST_CASE(scroll_LAYOUT_HANDLED_layerVisibilityOnFs) {
     // dispel the FS of floating kitty
 
     OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'unset', window = 'class:floating_cat' })"));
-
     {
         auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
         EXPECT_CONTAINS(str, "a: 1")
@@ -1354,7 +1305,6 @@ TEST_CASE(scroll_LAYOUT_HANDLED_layerVisibilityOnFs) {
     }
 
     OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'set', window = 'class:floating_cat2' })"));
-
     {
         auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
         EXPECT_CONTAINS(str, "a: 0")
@@ -1362,7 +1312,6 @@ TEST_CASE(scroll_LAYOUT_HANDLED_layerVisibilityOnFs) {
     }
 
     OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'set', window = 'class:floating_cat2' })"));
-
     {
         auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
         EXPECT_CONTAINS(str, "a: 1")
@@ -1370,9 +1319,7 @@ TEST_CASE(scroll_LAYOUT_HANDLED_layerVisibilityOnFs) {
     }
 
     OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'unset', window = 'class:floating_cat2' })"));
-
     // the fullscreen tiled window is now in effect
-
     {
         auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
         EXPECT_CONTAINS(str, "a: 0")
@@ -1636,6 +1583,61 @@ TEST_CASE(scroll_LAYOUT_HANDLED_respectFocusFitMethodOnUnFs) {
         EXPECT_CONTAINS(str, "fullscreenClient: 0");
         EXPECT_CONTAINS(str, "at: 27,22");
     }
+}
+
+TEST_CASE(scroll_LAYOUT_HANDLED_FloatingOntopFullscreenWorkspaceFocusRetention) {
+
+    OK(getFromSocket("/eval hl.config({ general = { layout = 'scrolling' } })"));
+
+    OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = '1' })"));
+
+    OK(getFromSocket("/eval hl.window_rule({ match = { class = 'kitty_floated' }, float = true })"));
+
+    const auto test_default_layout_handled_behaviour = [&](bool fullscreen, bool layoutAware) -> void {
+        SPAWN_KITTY("kitty_tiled");
+
+        OK(getFromSocket(std::format("/dispatch hl.dsp.window.fullscreen({{ mode = '{}', action = 'set', layout_aware = {}, window = 'class:kitty_tiled' }})",
+                                     (fullscreen ? "fullscreen" : "maximized"), (layoutAware ? "true" : "false"))));
+        {
+            auto str = getFromSocket("/activewindow");
+            EXPECT_CONTAINS(str, "class: kitty_tiled");
+            EXPECT_CONTAINS(str, "floating: 0")
+            EXPECT_CONTAINS(str, std::format("fullscreen: {}", (fullscreen ? "2" : "1")));
+            EXPECT_CONTAINS(str, std::format("fullscreenClient: {}", (fullscreen ? "2" : "1")));
+        }
+
+        SPAWN_KITTY("kitty_floated");
+        {
+            auto str = getFromSocket("/activewindow");
+            EXPECT_CONTAINS(str, "class: kitty_floated");
+            EXPECT_CONTAINS(str, "floating: 1")
+            EXPECT_CONTAINS(str, "fullscreen: 0");
+            EXPECT_CONTAINS(str, "fullscreenClient: 0");
+        }
+
+        OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = '2' })"));
+        OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = '1' })"));
+
+        // Expect the focus to be on the floating window ontop of the covering FS still
+        {
+            auto str = getFromSocket("/activewindow");
+            EXPECT_CONTAINS(str, "class: kitty_floated");
+            EXPECT_CONTAINS(str, "floating: 1")
+            EXPECT_CONTAINS(str, "fullscreen: 0");
+            EXPECT_CONTAINS(str, "fullscreenClient: 0");
+        }
+    };
+
+    // Fullscreen First
+
+    test_default_layout_handled_behaviour(true, true);
+
+    Tests::killAllWindows();
+    Tests::waitUntilWindowsN(0);
+
+    // Then Maximise
+
+    test_default_layout_handled_behaviour(false, true);
 }
 
 TEST_CASE(scroll_DEFAULT_HANDLED_fullscreenMaximiseDispatchers) {
@@ -2389,6 +2391,335 @@ TEST_CASE(scroll_DEFAULT_HANDLED_FullscreenNonInterference) {
     }
 }
 
+TEST_CASE(scroll_DEFAULT_HANDLED_FloatingOntopFullscreenWorkspaceFocusRetention) {
+
+    OK(getFromSocket("/eval hl.config({ general = { layout = 'scrolling' } })"));
+
+    OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = '1' })"));
+
+    OK(getFromSocket("/eval hl.window_rule({ match = { class = 'kitty_floated' }, float = true })"));
+
+    const auto test_default_layout_handled_behaviour = [&](bool fullscreen, bool layoutAware) -> void {
+        SPAWN_KITTY("kitty_tiled");
+
+        OK(getFromSocket(std::format("/dispatch hl.dsp.window.fullscreen({{ mode = '{}', action = 'set', layout_aware = {}, window = 'class:kitty_tiled' }})",
+                                     (fullscreen ? "fullscreen" : "maximized"), (layoutAware ? "true" : "false"))));
+        {
+            auto str = getFromSocket("/activewindow");
+            EXPECT_CONTAINS(str, "class: kitty_tiled");
+            EXPECT_CONTAINS(str, "floating: 0")
+            EXPECT_CONTAINS(str, std::format("fullscreen: {}", (fullscreen ? "2" : "1")));
+            EXPECT_CONTAINS(str, std::format("fullscreenClient: {}", (fullscreen ? "2" : "1")));
+        }
+
+        SPAWN_KITTY("kitty_floated");
+        {
+            auto str = getFromSocket("/activewindow");
+            EXPECT_CONTAINS(str, "class: kitty_floated");
+            EXPECT_CONTAINS(str, "floating: 1")
+            EXPECT_CONTAINS(str, "fullscreen: 0");
+            EXPECT_CONTAINS(str, "fullscreenClient: 0");
+        }
+
+        OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = '2' })"));
+        OK(getFromSocket("/dispatch hl.dsp.focus({ workspace = '1' })"));
+
+        // Expect the focus to be on the floating window ontop of the covering FS still
+        {
+            auto str = getFromSocket("/activewindow");
+            EXPECT_CONTAINS(str, "class: kitty_floated");
+            EXPECT_CONTAINS(str, "floating: 1")
+            EXPECT_CONTAINS(str, "fullscreen: 0");
+            EXPECT_CONTAINS(str, "fullscreenClient: 0");
+        }
+    };
+
+    // Fullscreen First
+
+    test_default_layout_handled_behaviour(true, false);
+
+    Tests::killAllWindows();
+    Tests::waitUntilWindowsN(0);
+
+    // Then Maximise
+
+    test_default_layout_handled_behaviour(false, false);
+}
+
+TEST_CASE(scroll_DEFAULT_HANDLED_posAndSizeSyncWhileFS) {
+    /*
+        This is a scrolling default FS specific test - not relevant for other layouts
+    */
+
+    // When a window is maximised, add or remove an overlay top bar. Its pos/size is meant to change (since work area changed).
+
+    SPAWN_KITTY("kot");
+
+    ASSERT(spawnLayer("top-bar", {"--edge=top", "--layer=overlay", "--lines=48px", "--focus-policy=not-allowed"}), true);
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', window = 'class:kot', layout_aware = false, })"));
+    {
+        auto str = getFromSocket("/activewindow");
+        EXPECT_CONTAINS(str, "class: kot");
+        EXPECT_CONTAINS(str, "fullscreen: 1");
+        EXPECT_CONTAINS(str, "fullscreenClient: 1");
+        ASSERT_CONTAINS(str, "size: 1876,987");
+    }
+
+    Tests::killAllLayers();
+    Tests::waitUntilLayersN(0);
+
+    {
+        auto str = getFromSocket("/activewindow");
+        EXPECT_CONTAINS(str, "class: kot");
+        EXPECT_CONTAINS(str, "fullscreen: 1");
+        EXPECT_CONTAINS(str, "fullscreenClient: 1");
+        ASSERT_CONTAINS(str, "size: 1876,1036");
+    }
+}
+
+TEST_CASE(scroll_DEFAULT_HANDLED_layerVisibilityOnFs) {
+
+    /*
+    
+        A copy of the test from other, deafult handled FS only, layouts - tested in scrolling default handled FS
+
+    */
+
+    OK(getFromSocket("/eval hl.config({ general = { layout = 'scrolling' } })"));
+
+    const auto doMassacre = [&]() -> void {
+        Tests::killAllLayers();
+        Tests::waitUntilLayersN(0);
+        Tests::killAllWindows();
+        Tests::waitUntilWindowsN(0);
+    };
+
+    static constexpr const char* LAYER_NAMESPACE = "bar-like-layer";
+
+    const auto                   spawnLayerAndWaitTillSuccess_TOP = [&]() {
+        ASSERT(spawnLayer(LAYER_NAMESPACE, {"--edge=top", "--layer=top", "--lines=48px", "--focus-policy=not-allowed"}), true);
+        Tests::waitUntilLayersN(1);
+    };
+
+    const auto spawnLayerAndWaitTillSuccess_OVERLAY = [&]() {
+        ASSERT(spawnLayer(LAYER_NAMESPACE, {"--edge=top", "--layer=overlay", "--lines=48px", "--focus-policy=not-allowed"}), true);
+        Tests::waitUntilLayersN(1);
+    };
+
+    // For default handled fullscreen
+
+    // FS after a layer has been created
+    spawnLayerAndWaitTillSuccess_TOP();
+
+    SPAWN_KITTY("cat");
+
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1")
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 0");
+    }
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'set', window = 'class:cat', layout_aware = false })"));
+    {
+
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 1");
+    }
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'unset', window = 'class:cat', layout_aware = false })"));
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 0");
+    }
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'set', window = 'class:cat', layout_aware = false })"));
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 0");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 2");
+    }
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'unset', window = 'class:cat', layout_aware = false })"));
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 0");
+    }
+
+    // TOP Layer spawn after FS
+
+    doMassacre();
+
+    // allow_new_top_layers_over_existing_fullscreen = true
+    OK(getFromSocket("/eval hl.config({ misc = { allow_new_top_layers_over_existing_fullscreen = true } })"));
+
+    SPAWN_KITTY("cat");
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'set', window = 'class:cat', layout_aware = false })"));
+    spawnLayerAndWaitTillSuccess_TOP();
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 1");
+    }
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'unset', window = 'class:cat', layout_aware = false })"));
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 0");
+    }
+
+    doMassacre();
+    SPAWN_KITTY("cat");
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'set', window = 'class:cat', layout_aware = false })"));
+    spawnLayerAndWaitTillSuccess_TOP();
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 2");
+    }
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'unset', window = 'class:cat', layout_aware = false })"));
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 0");
+    }
+
+    // allow_new_top_layers_over_existing_fullscreen = false
+
+    doMassacre();
+
+    OK(getFromSocket("/eval hl.config({ misc = { allow_new_top_layers_over_existing_fullscreen = false },})"));
+
+    SPAWN_KITTY("cat");
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'set', window = 'class:cat', layout_aware = false })"));
+    spawnLayerAndWaitTillSuccess_TOP();
+    {
+
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 1");
+    }
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'unset', window = 'class:cat', layout_aware = false })"));
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 0");
+    }
+
+    doMassacre();
+    SPAWN_KITTY("cat");
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'set', window = 'class:cat', layout_aware = false })"));
+    spawnLayerAndWaitTillSuccess_TOP();
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 0");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 2");
+    }
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'unset', window = 'class:cat', layout_aware = false })"));
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 0");
+    }
+
+    doMassacre();
+
+    // Overlay is always ontop, spawn later or before FS
+
+    // we need not test with the allow_new_top_layers_over_existing_fullscreen config opt as it's only relevant to TOP layer.
+
+    // FS after a layer has been created
+    spawnLayerAndWaitTillSuccess_OVERLAY();
+
+    SPAWN_KITTY("cat");
+
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 0");
+    }
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'set', window = 'class:cat', layout_aware = false })"));
+    {
+
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 1");
+    }
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'unset', window = 'class:cat', layout_aware = false })"));
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 0");
+    }
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'set', window = 'class:cat', layout_aware = false })"));
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 2");
+    }
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'unset', window = 'class:cat', layout_aware = false })"));
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 0");
+    }
+
+    // overlay Layer spawn after FS
+
+    doMassacre();
+    SPAWN_KITTY("cat");
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'set', window = 'class:cat', layout_aware = false })"));
+    spawnLayerAndWaitTillSuccess_OVERLAY();
+    {
+
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 1");
+    }
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'maximized', action = 'unset', window = 'class:cat', layout_aware = false })"));
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 0");
+    }
+
+    doMassacre();
+    SPAWN_KITTY("cat");
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'set', window = 'class:cat', layout_aware = false })"));
+    spawnLayerAndWaitTillSuccess_OVERLAY();
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 2");
+    }
+
+    OK(getFromSocket("/dispatch hl.dsp.window.fullscreen({ mode = 'fullscreen', action = 'unset', window = 'class:cat', layout_aware = false })"));
+    {
+        auto str = getLayerLine(getFromSocket("/layers"), LAYER_NAMESPACE);
+        EXPECT_CONTAINS(str, "a: 1");
+        EXPECT_CONTAINS(getFromSocket("/activewindow"), "fullscreen: 0");
+    }
+}
+
 /* Scroll viewport tests */
 
 TEST_CASE(scrollNegativeScaleGesture) {
@@ -3032,7 +3363,7 @@ TEST_CASE(testScrollingViewBehaviourScheduledPropRefresh) {
     OK(getFromSocket("/dispatch hl.dsp.focus({ window = 'class:a' })"));
 
     // setting a workspace rule queues a doLater() call in the Event Loop Manager
-    OK(getFromSocket("/eval hl.dispatch(hl.dsp.layout('inhibit_scroll true')); hl.workspace_rule({workspace = hl.get_active_workspace().id,gaps_in = 0}); "
+    OK(getFromSocket("/eval hl.dispatch(hl.dsp.layout('inhibit_scroll true')); hl.workspace_rule({workspace = hl.get_active_workspace().addressable_name,gaps_in = 0}); "
                      "hl.exec_scheduled_prop_refresh_immediately(); hl.dispatch(hl.dsp.layout('inhibit_scroll false'));"));
 
     // Check that the workspace rule is set

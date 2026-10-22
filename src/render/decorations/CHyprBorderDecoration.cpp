@@ -10,6 +10,7 @@
 #include "../../managers/fullscreen/FullscreenController.hpp"
 #include "../pass/BorderPassElement.hpp"
 #include "../Renderer.hpp"
+#include "../WindowRenderPresentation.hpp"
 #include "../../state/MonitorState.hpp"
 
 CHyprBorderDecoration::CHyprBorderDecoration(PHLWINDOW pWindow) :
@@ -40,26 +41,24 @@ void CHyprBorderDecoration::onPositioningReply(const SDecorationPositioningReply
 }
 
 CBox CHyprBorderDecoration::assignedBoxGlobal() {
+    return assignedBoxGlobal(m_window->presentation().renderPresentation());
+}
+
+CBox CHyprBorderDecoration::assignedBoxGlobal(const Render::SWindowRenderPresentation& presentation) {
     CBox box = m_assignedGeometry;
     box.translate(g_pDecorationPositioner->getEdgeDefinedPoint(DECORATION_EDGE_BOTTOM | DECORATION_EDGE_LEFT | DECORATION_EDGE_RIGHT | DECORATION_EDGE_TOP, m_window));
 
-    const auto PWORKSPACE = m_window->m_workspace;
-
-    if (!PWORKSPACE)
-        return box;
-
-    const auto WORKSPACEOFFSET = PWORKSPACE && !(m_window->m_state & Desktop::View::WINDOW_STATE_PINNED) ? PWORKSPACE->m_renderOffset->value() : Vector2D();
-    return box.translate(WORKSPACEOFFSET);
+    return box.translate(presentation.workspaceOffset);
 }
 
-void CHyprBorderDecoration::draw(PHLMONITOR pMonitor, float const& a) {
+void CHyprBorderDecoration::draw(Render::CRenderContext& ctx, PHLMONITOR pMonitor, float const& a, const Render::SWindowRenderPresentation& presentation) {
     if (doesntWantBorders())
         return;
 
     if (m_assignedGeometry.width < m_extents.topLeft.x + 1 || m_assignedGeometry.height < m_extents.topLeft.y + 1)
         return;
 
-    CBox windowBox = assignedBoxGlobal().translate(-pMonitor->m_position + m_window->presentation().floatingOffset()).expand(-borderSize()).scale(pMonitor->m_scale).round();
+    CBox windowBox = assignedBoxGlobal(presentation).translate(-pMonitor->m_position + presentation.floatingOffset).expand(-borderSize()).scale(pMonitor->m_scale).round();
 
     if (windowBox.width < 1 || windowBox.height < 1)
         return;
@@ -89,7 +88,7 @@ void CHyprBorderDecoration::draw(PHLMONITOR pMonitor, float const& a) {
         data.lerp     = GRADIENT.progress;
     }
 
-    g_pHyprRenderer->addPassElement(makeUnique<CBorderPassElement>(data));
+    g_pHyprRenderer->addPassElement(ctx, makeUnique<CBorderPassElement>(data));
 }
 
 eDecorationType CHyprBorderDecoration::getDecorationType() {

@@ -35,6 +35,7 @@ PHLLS CLayerSurface::create(SP<CLayerShellResource> resource) {
     pLS->m_namespace      = resource->m_layerNamespace;
     pLS->m_layer          = std::clamp(resource->m_current.layer, ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY);
     pLS->setPopupHead(CPopup::create(pLS));
+    pLS->setSubsurfaceHead(CSubsurface::create(pLS));
 
     Animation::mgr()->createAnimation(0.f, pLS->m_alpha.get(LS_ALPHA_FADE), Config::animationTree()->getAnimationPropertyConfig("fadeLayersIn"), pLS, AVARDAMAGE_ENTIRE);
     Animation::mgr()->createAnimation(Vector2D(0, 0), pLS->positionAnimation(), Config::animationTree()->getAnimationPropertyConfig("layersIn"), pLS, AVARDAMAGE_ENTIRE);
@@ -154,6 +155,7 @@ void CLayerSurface::onDestroy() {
     }
 
     resetPopupHead();
+    resetSubsurfaceHead();
 
     m_flags |= LAYER_FLAG_DEAD;
 
@@ -185,7 +187,6 @@ void CLayerSurface::onMap() {
 
     m_mapped                = true;
     m_keyboardInteractivity = m_layerSurface->m_current.keyboardInteractivity;
-    m_flags |= LAYER_FLAG_ABOVE_FULLSCREEN;
 
     m_ruleApplicator->propertiesChanged(Desktop::Rule::RULE_PROP_ALL);
 
@@ -196,6 +197,15 @@ void CLayerSurface::onMap() {
 
     if (!PMONITOR)
         return;
+
+    static auto PALLOWNEWTOPOVERFULLSCREEN = CConfigValue<Config::INTEGER>("misc:allow_new_top_layers_over_existing_fullscreen");
+
+    // if PALLOWNEWTOPOVERFULLSCREEN = true: guard against making top layer elements, like bars, visible ontop of fullscreen
+    // Monitor only recognises a window as FS if it is FSMODE_FULLSCREEN so that's guaranteed here
+    if ((m_layer >= ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY) || (m_layer == ZWLR_LAYER_SHELL_V1_LAYER_TOP && (*PALLOWNEWTOPOVERFULLSCREEN)))
+        m_flags |= LAYER_FLAG_ABOVE_FULLSCREEN;
+    else
+        m_flags &= ~LAYER_FLAG_ABOVE_FULLSCREEN;
 
     PMONITOR->m_scheduledRecalc = true;
 
@@ -218,8 +228,7 @@ void CLayerSurface::onMap() {
         if (g_pSeatManager->m_seatGrab && !g_pSeatManager->m_seatGrab->accepts(m_wlSurface->resource()))
             g_pSeatManager->setGrab(nullptr);
 
-        g_pInputManager->releaseAllMouseButtons();
-        Desktop::focusState()->rawSurfaceFocus(m_wlSurface->resource());
+        takeKeyboardFocus();
     }
 
     // update pointer focus
@@ -233,7 +242,11 @@ void CLayerSurface::onMap() {
     m_realPosition->setConfig(Config::animationTree()->getAnimationPropertyConfig("layersIn"));
     m_realSize->setConfig(Config::animationTree()->getAnimationPropertyConfig("layersIn"));
     m_alpha.get(LS_ALPHA_FADE)->setConfig(Config::animationTree()->getAnimationPropertyConfig("fadeLayersIn"));
-    m_animationController.apply(m_animationController.animateIn());
+
+    // If fullscreen window present check if layer is allowed above it
+    // Monitor only recognises a window as FS if it is FSMODE_FULLSCREEN so that's guaranteed here
+    if (!Fullscreen::controller()->hasFullscreen(PMONITOR, true) || (m_flags & LAYER_FLAG_ABOVE_FULLSCREEN))
+        m_animationController.apply(m_animationController.animateIn());
 
     IPC::Socket2::sock()->postEvent({.event = "openlayer", .data = m_namespace});
     Event::bus()->m_events.layer.opened.emit(m_self.lock());
@@ -345,13 +358,18 @@ void CLayerSurface::onCommit() {
             }
 
             m_layer = NEW_LAYER;
-            if (NEW_LAYER >= ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY)
+
+            static auto PALLOWNEWTOPOVERFULLSCREEN = CConfigValue<Config::INTEGER>("misc:allow_new_top_layers_over_existing_fullscreen");
+
+            // if PALLOWNEWTOPOVERFULLSCREEN = true: guard against making top layer elements, like bars, visible ontop of fullscreen
+            // Monitor only recognises a window as FS if it is FSMODE_FULLSCREEN so that's guaranteed here
+            if ((m_layer >= ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY) || (m_layer == ZWLR_LAYER_SHELL_V1_LAYER_TOP && (*PALLOWNEWTOPOVERFULLSCREEN)))
                 m_flags |= LAYER_FLAG_ABOVE_FULLSCREEN;
             else
                 m_flags &= ~LAYER_FLAG_ABOVE_FULLSCREEN;
 
             // if in fullscreen, only overlay can be above.
-            *m_alpha.get(LS_ALPHA_FADE) = Fullscreen::controller()->hasFullscreen(PMONITOR) ? (m_layer >= ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY ? 1.F : 0.F) : 1.F;
+            *m_alpha.get(LS_ALPHA_FADE) = Fullscreen::controller()->hasFullscreen(PMONITOR, true) ? (m_layer >= ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY ? 1.F : 0.F) : 1.F;
 
             if (m_layer == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND || m_layer == ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM)
                 PMONITOR->m_blurFBDirty = true; // so that blur is recalc'd
@@ -420,8 +438,8 @@ void CLayerSurface::onCommit() {
         } else if (!WAS_KEYBOARD_EXCLUSIVE && KEYBOARD_EXCLUSIVE) {
             // if now exclusive and not previously
             g_pSeatManager->setGrab(nullptr);
-            g_pInputManager->releaseAllMouseButtons();
-            Desktop::focusState()->rawSurfaceFocus(m_wlSurface->resource());
+            takeKeyboardFocus();
+            g_pInputManager->simulateMouseMovement();
         }
     }
 
@@ -430,6 +448,16 @@ void CLayerSurface::onCommit() {
     g_pHyprRenderer->damageSurface(m_wlSurface->resource(), m_position.x, m_position.y);
 
     updateSurfaceScaleTransformDetails();
+}
+
+void CLayerSurface::takeKeyboardFocus() {
+    g_pInputManager->releaseAllMouseButtons();
+    Desktop::focusState()->rawSurfaceFocus(m_wlSurface->resource());
+
+    // Release the old pointer focus so native constraints and confine_pointer rules cannot
+    // prevent the subsequent mouse movement from hit-testing the layer.
+    if (g_pSeatManager->m_state.keyboardFocus == m_wlSurface->resource() && g_pSeatManager->m_state.pointerFocus != m_wlSurface->resource())
+        g_pSeatManager->setPointerFocus(nullptr, {});
 }
 
 MONITORID CLayerSurface::monitorID() {
@@ -505,4 +533,8 @@ bool CLayerSurface::shouldBlur() const {
         return !surface->m_blurRegion.empty();
 
     return m_ruleApplicator->blur().valueOrDefault();
+}
+
+bool CLayerSurface::cantLockCursor() const {
+    return false;
 }

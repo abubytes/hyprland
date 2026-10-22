@@ -32,6 +32,7 @@ in
     inputs.hyprgraphics.overlays.default
     inputs.hyprland-protocols.overlays.default
     inputs.hyprland-guiutils.overlays.default
+    inputs.hyprtoolkit.overlays.default
     inputs.hyprlang.overlays.default
     inputs.hyprutils.overlays.default
     inputs.hyprwayland-scanner.overlays.default
@@ -84,7 +85,7 @@ in
 
       hyprland-hidpi = builtins.trace ''
         hyprland-hidpi was removed. Please use the hyprland package.
-        For more information, refer to https://wiki.hypr.land/Configuring/XWayland.
+        For more information, refer to https://wiki.hypr.land/configuring/extra/xwayland/.
       '' final.hyprland;
     };
 

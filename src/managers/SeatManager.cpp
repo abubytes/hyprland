@@ -363,7 +363,12 @@ void CSeatManager::setPointerFocus(SP<CWLSurfaceResource> surf, const Vector2D& 
         return;
     }
 
+    if (g_pInputManager->pointerConstraints().preservesPointerFocus(surf))
+        return;
+
     m_listeners.pointerSurfaceDestroy.reset();
+
+    g_pInputManager->pointerConstraints().release();
 
     for (auto const& p : PROTO::seat->m_pointers) {
         if (!p)
@@ -412,7 +417,7 @@ void CSeatManager::setPointerFocus(SP<CWLSurfaceResource> surf, const Vector2D& 
 }
 
 void CSeatManager::sendPointerMotion(uint32_t timeMs, const Vector2D& local) {
-    if (!m_state.pointerFocusResource)
+    if (!m_state.pointerFocusResource || g_pInputManager->pointerConstraints().blocksAbsoluteMotion())
         return;
 
     for (auto const& s : m_seatResources) {
@@ -748,6 +753,10 @@ void CSeatManager::setCurrentPrimarySelection(SP<IDataSource> source) {
 }
 
 void CSeatManager::setGrab(SP<CSeatGrab> grab) {
+    // Do not grab when we have a lockscreen - no surface should grab in those cases.
+    if (g_pInputManager->isLocked() && grab)
+        return;
+
     if (m_seatGrab) {
         auto oldGrab = m_seatGrab;
 

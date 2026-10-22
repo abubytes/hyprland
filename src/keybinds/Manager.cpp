@@ -1,4 +1,5 @@
 #include "Manager.hpp"
+#include "../helpers/MiscFunctions.hpp"
 #include "MatchResolver.hpp"
 
 #include "../Compositor.hpp"
@@ -575,7 +576,7 @@ SBindResult CKeybindManager::processEvent(const SBindEventContext& context, cons
     if (!repeatHits.empty())
         scheduleRepeat(repeatHits, context, keyboard, pressedInput != nullptr);
 
-    if (!PROTO::inputCapture->isCaptured())
+    if (!PROTO::inputCapture->isCaptured() && !g_layoutManager->dragController()->target())
         g_layoutManager->dragController()->resetDragThresholdReached();
     aggregate.passEvent = !claimed;
     if (!claimed && INHIBITED) {

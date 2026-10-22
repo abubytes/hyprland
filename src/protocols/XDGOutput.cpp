@@ -66,10 +66,8 @@ void CXDGOutputProtocol::onManagerGetXDGOutput(CZxdgOutputManagerV1* mgr, uint32
         return;
     }
 
-    if UNLIKELY (!PMONITOR) {
-        LOG(Log::ERR, "New xdg_output from client {:x} ({}) has no CMonitor?!", (uintptr_t)CLIENT, pXDGOutput->m_isXWayland ? "xwayland" : "not xwayland");
+    if (pXDGOutput->isInert())
         return;
-    }
 
     LOG(Log::DEBUG, "New xdg_output for {}: client {:x} ({})", PMONITOR->m_name, (uintptr_t)CLIENT, pXDGOutput->m_isXWayland ? "xwayland" : "not xwayland");
 
@@ -91,10 +89,13 @@ void CXDGOutputProtocol::updateAllOutputs() {
     LOG(Log::DEBUG, "updating all xdg_output heads");
 
     for (auto const& o : m_xdgOutputs) {
+        // sendDetails() rebinds m_monitor from the wl_output first (split heads), so check inertness after it
         o->sendDetails();
 
-        if (o->m_monitor)
-            o->m_monitor->scheduleDone();
+        if (o->isInert())
+            continue;
+
+        o->m_monitor->scheduleDone();
     }
 }
 
@@ -108,19 +109,23 @@ CXDGOutput::CXDGOutput(SP<CZxdgOutputV1> resource_, PHLMONITOR monitor_) : m_mon
     m_resource->setOnDestroy([](CZxdgOutputV1* pMgr) { PROTO::xdgOutput->onOutputResourceDestroy(pMgr->resource()); });
 }
 
+bool CXDGOutput::isInert() const {
+    return !m_monitor || !m_monitor->m_output || !m_outputProto || m_outputProto->isDefunct();
+}
+
 void CXDGOutput::sendDetails() {
+    // follow the wl_output's current monitor (split heads may rebind it)
+    if (m_outputProto && !m_outputProto->isDefunct()) {
+        if (const auto OUTPUT_MONITOR = m_outputProto->m_monitor.lock(); OUTPUT_MONITOR)
+            m_monitor = OUTPUT_MONITOR;
+    }
+
+    if (isInert())
+        return;
+
     static auto PXWLFORCESCALEZERO = CConfigValue<Config::INTEGER>("xwayland:force_zero_scaling");
 
-    if UNLIKELY (!m_outputProto || m_outputProto->isDefunct())
-        return;
-
-    if (const auto OUTPUT_MONITOR = m_outputProto->m_monitor.lock(); OUTPUT_MONITOR)
-        m_monitor = OUTPUT_MONITOR;
-
-    if UNLIKELY (!m_monitor)
-        return;
-
-    const auto POS = m_isXWayland ? m_monitor->m_xwaylandPosition : m_monitor->m_position;
+    const auto  POS = m_isXWayland ? m_monitor->m_xwaylandPosition : m_monitor->m_position;
     m_resource->sendLogicalPosition(POS.x, POS.y);
 
     if (*PXWLFORCESCALEZERO && m_isXWayland)

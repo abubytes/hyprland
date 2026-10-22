@@ -31,6 +31,7 @@
 ---| "window.pin"
 ---| "window.title"
 ---| "window.update_rules"
+---| "window.update_state"
 ---| "window.urgent"
 ---| "workspace.active"
 ---| "workspace.created"
@@ -317,6 +318,7 @@
 ---| "input.tablet.absolute_region_position"
 ---| "input.tablet.active_area_position"
 ---| "input.tablet.active_area_size"
+---| "input.tablet.enabled"
 ---| "input.tablet.left_handed"
 ---| "input.tablet.output"
 ---| "input.tablet.region_position"
@@ -362,6 +364,7 @@
 ---| "master.slave_count_for_center_master"
 ---| "master.smart_resizing"
 ---| "master.special_scale_factor"
+---| "misc.allow_new_top_layers_over_existing_fullscreen"
 ---| "misc.allow_session_lock_restore"
 ---| "misc.always_follow_on_dnd"
 ---| "misc.animate_manual_resizes"
@@ -450,6 +453,11 @@
 
 ---@class HL.Dispatcher
 local __HL_Dispatcher = {}
+
+---@class HL.WindowStateUpdate
+---@field float? boolean
+---@field pin? boolean
+local __HL_WindowStateUpdate = {}
 
 ---@class HL.Vec2
 ---@field x number
@@ -677,6 +685,25 @@ local __HL_WindowRuleSpec = {}
 ---@field workspace string
 local __HL_WorkspaceRuleSpec = {}
 
+---@class HL.Device
+---@field active_keymap? string
+---@field active_layout_index? integer
+---@field address? string
+---@field belongs_to? {address:string, name:string}
+---@field caps_lock? boolean
+---@field default_speed? number
+---@field layout? string
+---@field main? boolean
+---@field model? string
+---@field name? string
+---@field num_lock? boolean
+---@field options? string
+---@field rules? string
+---@field scroll_factor? number
+---@field type? "pointer"|"keyboard"|"tablet"|"tablet_pad"|"tablet_tool"|"touch"|"switch"
+---@field variant? string
+local __HL_Device = {}
+
 ---@class HL.EventSubscription
 ---@field is_active fun(self: HL.EventSubscription, ...): any
 ---@field remove fun(self: HL.EventSubscription, ...): any
@@ -853,13 +880,13 @@ local __HL_WindowRule = {}
 ---@field get_groups fun(self: HL.Workspace, ...): any
 ---@field get_windows fun(self: HL.Workspace, ...): any
 ---@field active boolean
----@field config_name string
+---@field addressable_name string
 ---@field fullscreen_mode integer
 ---@field fullscreen_window HL.Window|nil
 ---@field groups integer|nil
 ---@field has_fullscreen boolean
 ---@field has_urgent boolean
----@field id integer
+---@field id integer|nil
 ---@field is_empty boolean
 ---@field is_persistent boolean
 ---@field last_window HL.Window|nil
@@ -896,6 +923,7 @@ local __HL_WorkspaceRule = {}
 ---@field get_config fun(key: HL.ConfigKey|string): any, string?
 ---@field get_current_submap fun(): string
 ---@field get_cursor_pos fun(): HL.Vec2|nil
+---@field get_devices fun(): HL.Device[]
 ---@field get_last_window fun(): HL.Window|nil
 ---@field get_last_workspace fun(monitor?: HL.MonitorSelector): HL.Workspace|nil
 ---@field get_layers fun(filters?: HL.LayerQueryFilter): HL.LayerSurface[]
@@ -913,7 +941,6 @@ local __HL_WorkspaceRule = {}
 ---@field is_key_down fun(key: number|string): boolean
 ---@field layer_rule fun(spec: HL.LayerRuleSpec): HL.LayerRule
 ---@field monitor fun(spec: HL.MonitorSpec): nil
----@field on fun(event: HL.EventName, cb: fun(...)): HL.EventSubscription
 ---@field permission fun(spec: HL.PermissionSpec): nil
 ---@field timer fun(callback: function, opts: HL.TimerOptions): HL.Timer
 ---@field unbind fun(key: string): nil
@@ -929,8 +956,8 @@ local __HL_API = {}
 ---@class HL.DspNamespace
 ---@field dpms fun(...): HL.Dispatcher
 ---@field event fun(...): HL.Dispatcher
----@field exec_cmd fun(...): HL.Dispatcher
----@field exec_raw fun(...): HL.Dispatcher
+---@field exec_cmd fun(cmd: string, rules?: table<string, string|number|boolean>): HL.Dispatcher
+---@field exec_raw fun(cmd: string): HL.Dispatcher
 ---@field exit fun(...): HL.Dispatcher
 ---@field focus fun(...): HL.Dispatcher
 ---@field force_idle fun(...): HL.Dispatcher
@@ -1011,6 +1038,12 @@ local __HL_NotificationNamespace = {}
 ---@field [string] any
 local __HL_PluginNamespace = {}
 
+---@overload fun(event: "window.update_state", cb: fun(window: HL.Window|nil, changes: HL.WindowStateUpdate)): HL.EventSubscription
+---@param event HL.EventName
+---@param cb fun(...)
+---@return HL.EventSubscription
+function __HL_API.on(event, cb) end
+
 ---@type HL.API
 hl = {}
 
@@ -1030,7 +1063,7 @@ hl = {}
 ---@field ['binds.pass_mouse_when_bound'] boolean
 ---@field ['binds.scroll_event_delay'] integer|boolean
 ---@field ['binds.window_direction_monitor_fallback'] boolean
----@field ['binds.workspace_back_and_forth'] boolean
+---@field ['binds.workspace_back_and_forth'] integer|boolean
 ---@field ['binds.workspace_center_on'] integer|boolean
 ---@field ['cursor.default_monitor'] string
 ---@field ['cursor.enable_hyprcursor'] boolean
@@ -1293,6 +1326,7 @@ hl = {}
 ---@field ['input.tablet.absolute_region_position'] boolean
 ---@field ['input.tablet.active_area_position'] HL.Vec2Like
 ---@field ['input.tablet.active_area_size'] HL.Vec2Like
+---@field ['input.tablet.enabled'] boolean
 ---@field ['input.tablet.left_handed'] boolean
 ---@field ['input.tablet.output'] string
 ---@field ['input.tablet.region_position'] HL.Vec2Like
@@ -1338,6 +1372,7 @@ hl = {}
 ---@field ['master.slave_count_for_center_master'] integer|boolean
 ---@field ['master.smart_resizing'] boolean
 ---@field ['master.special_scale_factor'] number|boolean
+---@field ['misc.allow_new_top_layers_over_existing_fullscreen'] boolean
 ---@field ['misc.allow_session_lock_restore'] boolean
 ---@field ['misc.always_follow_on_dnd'] boolean
 ---@field ['misc.animate_manual_resizes'] boolean
@@ -1666,6 +1701,7 @@ local __HL_ConfigValueTypes = {}
 ---@field release_pressed_on_close? boolean
 
 ---@class HL.ConfigOpt.Input.Tablet
+---@field enabled? boolean
 ---@field transform? integer|boolean
 ---@field output? string
 ---@field region_position? HL.Vec2Like
@@ -1772,6 +1808,7 @@ local __HL_ConfigValueTypes = {}
 ---@field name_vk_after_proc? boolean
 ---@field always_follow_on_dnd? boolean
 ---@field layers_hog_keyboard_focus? boolean
+---@field allow_new_top_layers_over_existing_fullscreen? boolean
 ---@field animate_manual_resizes? boolean
 ---@field animate_mouse_windowdragging? boolean
 ---@field disable_autoreload? boolean
@@ -1810,7 +1847,7 @@ local __HL_ConfigValueTypes = {}
 ---@class HL.ConfigOpt.Binds
 ---@field pass_mouse_when_bound? boolean
 ---@field scroll_event_delay? integer|boolean
----@field workspace_back_and_forth? boolean
+---@field workspace_back_and_forth? integer|boolean
 ---@field hide_special_on_workspace_change? boolean
 ---@field allow_workspace_cycles? boolean
 ---@field workspace_center_on? integer|boolean
