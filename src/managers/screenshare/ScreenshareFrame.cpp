@@ -601,7 +601,10 @@ bool CScreenshareFrame::copyDmabuf() {
             return;
 
         LOG(Log::TRACE, "Copied frame via dma");
-        LOG(Log::TRACE, "[SSDBG] copyDmabuf endRender callback copied mon={}", self->m_session->monitor() ? self->m_session->monitor()->m_name : "<none>");
+        // The session can die while the copy is in flight (DPMS off disconnects the
+        // monitor -> session stop), so the fence callback must not assume it is alive.
+        LOG(Log::TRACE, "[SSDBG] copyDmabuf endRender callback copied mon={}",
+            !self->m_session.expired() && self->m_session->monitor() ? self->m_session->monitor()->m_name : "<none>");
         self->m_callback(RESULT_COPIED);
         self->m_copied = true;
     });
